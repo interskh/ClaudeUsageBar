@@ -214,24 +214,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateStatusIcon(percentage: Int) {
+        updateStatusIcon(sessionPercentage: percentage, weeklyPercentage: 0)
+    }
+
+    func updateStatusIcon(sessionPercentage: Int, weeklyPercentage: Int) {
         guard let button = statusItem.button else { return }
 
-        // Determine color based on percentage
+        let maxPercentage = max(sessionPercentage, weeklyPercentage)
+
         let color: NSColor
-        if percentage < 70 {
-            color = NSColor(red: 0.13, green: 0.77, blue: 0.37, alpha: 1.0) // Green
-        } else if percentage < 90 {
-            color = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0) // Yellow
+        if maxPercentage < 70 {
+            color = NSColor(red: 0.13, green: 0.77, blue: 0.37, alpha: 1.0)
+        } else if maxPercentage < 90 {
+            color = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
         } else {
-            color = NSColor(red: 1.0, green: 0.23, blue: 0.19, alpha: 1.0) // Red
+            color = NSColor(red: 1.0, green: 0.23, blue: 0.19, alpha: 1.0)
         }
 
-        // Create spark icon with color
         let sparkIcon = createSparkIcon(color: color)
 
-        // Set image and title
         button.image = sparkIcon
-        button.title = " \(percentage)%"
+        button.title = " \(sessionPercentage) · \(weeklyPercentage)%"
     }
 
     func createSparkIcon(color: NSColor) -> NSImage {
@@ -601,12 +604,11 @@ class UsageManager: ObservableObject {
 
     func updateStatusBar() {
         let sessionPercent = Int((Double(sessionUsage) / Double(sessionLimit)) * 100)
+        let weeklyPercent = Int((Double(weeklyUsage) / Double(weeklyLimit)) * 100)
 
-        // Update the icon color
-        delegate?.updateStatusIcon(percentage: sessionPercent)
+        delegate?.updateStatusIcon(sessionPercentage: sessionPercent, weeklyPercentage: weeklyPercent)
 
-        // Check for notification thresholds
-        checkNotificationThresholds(percentage: sessionPercent)
+        checkNotificationThresholds(percentage: max(sessionPercent, weeklyPercent))
     }
 
     func checkNotificationThresholds(percentage: Int) {
