@@ -39,13 +39,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: UsageView(usageManager: usageManager))
 
-        // Fetch initial data
+        // Fetch initial data and start adaptive refresh timer
         usageManager.fetchUsage()
-
-        // Set up timer to refresh every 5 minutes
-        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
-            self.usageManager.fetchUsage()
-        }
+        usageManager.startRefreshTimer()
 
         // Set up Cmd+U keyboard shortcut
         setupKeyboardShortcut()
@@ -323,11 +319,21 @@ class UsageManager: ObservableObject {
     private weak var delegate: AppDelegate?
     private var lastNotifiedThreshold: Int = 0
 
+    // Rate limiting / backoff state
+    private var refreshTimer: Timer?
+    private var consecutiveFailures: Int = 0
+    private let baseInterval: TimeInterval = 300 // 5 minutes
+    private let maxInterval: TimeInterval = 1800 // 30 minutes cap
+    private var retryAfterDate: Date?
+    private var lastFetchAttempt: Date?
+    private let fetchCooldown: TimeInterval = 60 // Don't hit API more than once per minute
+
     init(statusItem: NSStatusItem?, delegate: AppDelegate? = nil) {
         self.statusItem = statusItem
         self.delegate = delegate
         loadSessionCookie()
         loadSettings()
+        loadCachedUsage()
         checkAccessibilityStatus()
     }
 
@@ -392,10 +398,108 @@ class UsageManager: ObservableObject {
         lastNotifiedThreshold = 0
         UserDefaults.standard.set(0, forKey: "last_notified_threshold")
 
+        // Reset rate limiting state
+        consecutiveFailures = 0
+        retryAfterDate = nil
+        lastFetchAttempt = nil
+        refreshTimer?.invalidate()
+
         // Update status bar to show 0%
         delegate?.updateStatusIcon(percentage: 0)
 
         NSLog("ClaudeUsage: Cookie cleared, data reset")
+    }
+
+    // MARK: - Usage Cache (survives app restarts)
+
+    private func loadCachedUsage() {
+        let defaults = UserDefaults.standard
+
+        // Always restore last fetch timestamp (even without cached data)
+        // so cooldown works across restarts
+        if let ts = defaults.object(forKey: "cached_last_fetch_attempt") as? Date {
+            lastFetchAttempt = ts
+            NSLog("⏱️ Last fetch attempt was \(Int(Date().timeIntervalSince(ts)))s ago")
+        }
+
+        guard defaults.bool(forKey: "has_cached_usage") else { return }
+
+        sessionUsage = defaults.integer(forKey: "cached_session_usage")
+        weeklyUsage = defaults.integer(forKey: "cached_weekly_usage")
+        weeklySonnetUsage = defaults.integer(forKey: "cached_weekly_sonnet_usage")
+        hasWeeklySonnet = defaults.bool(forKey: "cached_has_weekly_sonnet")
+        hasFetchedData = true
+
+        if let ts = defaults.object(forKey: "cached_last_updated") as? Date {
+            lastUpdated = ts
+        }
+
+        NSLog("📦 Loaded cached usage: session \(sessionUsage)%, weekly \(weeklyUsage)%")
+        updateStatusBar()
+    }
+
+    private func saveCacheToDefaults() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "has_cached_usage")
+        defaults.set(sessionUsage, forKey: "cached_session_usage")
+        defaults.set(weeklyUsage, forKey: "cached_weekly_usage")
+        defaults.set(weeklySonnetUsage, forKey: "cached_weekly_sonnet_usage")
+        defaults.set(hasWeeklySonnet, forKey: "cached_has_weekly_sonnet")
+        defaults.set(lastUpdated, forKey: "cached_last_updated")
+    }
+
+    // MARK: - Timer & Backoff Management
+
+    func startRefreshTimer() {
+        scheduleTimer(interval: baseInterval)
+    }
+
+    private func scheduleTimer(interval: TimeInterval) {
+        let schedule = { [weak self] in
+            self?.refreshTimer?.invalidate()
+            self?.refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+                self?.fetchUsage()
+            }
+            NSLog("⏱️ Next fetch in \(Int(interval))s")
+        }
+        if Thread.isMainThread {
+            schedule()
+        } else {
+            DispatchQueue.main.async(execute: schedule)
+        }
+    }
+
+    private func currentBackoffInterval() -> TimeInterval {
+        guard consecutiveFailures > 0 else { return baseInterval }
+        // Cap exponent to prevent overflow (2^10 = 1024x, way past maxInterval)
+        let clampedFailures = min(consecutiveFailures, 10)
+        let backoff = baseInterval * pow(2.0, Double(clampedFailures - 1))
+        return min(backoff, maxInterval)
+    }
+
+    private func handleSuccess() {
+        consecutiveFailures = 0
+        retryAfterDate = nil
+        scheduleTimer(interval: baseInterval)
+    }
+
+    private func handleFailure(retryAfterSeconds: TimeInterval? = nil) {
+        consecutiveFailures += 1
+        let minInterval: TimeInterval = 60 // Never retry faster than 1 minute
+
+        let interval: TimeInterval
+        if let retryAfter = retryAfterSeconds, retryAfter >= minInterval {
+            // Server told us exactly how long to wait (and it's reasonable)
+            interval = retryAfter
+            retryAfterDate = Date().addingTimeInterval(retryAfter)
+            NSLog("⏳ Rate limited, server says retry after \(Int(retryAfter))s")
+        } else {
+            // Use exponential backoff (also covers Retry-After: 0 or missing header)
+            interval = max(currentBackoffInterval(), minInterval)
+            NSLog("⏳ Failure #\(consecutiveFailures), backing off to \(Int(interval))s")
+        }
+
+        scheduleTimer(interval: interval)
     }
 
     func fetchOrganizationId(completion: @escaping (String?) -> Void) {
@@ -419,6 +523,7 @@ class UsageManager: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 15
         request.setValue("sessionKey=\(sessionCookie)", forHTTPHeaderField: "Cookie")
 
         NSLog("📡 Fetching bootstrap to get org ID...")
@@ -446,8 +551,32 @@ class UsageManager: ObservableObject {
             return
         }
 
+        // Prevent concurrent requests
+        guard !isLoading else {
+            NSLog("⚠️ Fetch already in progress, skipping")
+            return
+        }
+
+        // Respect server-requested backoff (from 429 Retry-After)
+        if let retryDate = retryAfterDate, Date() < retryDate {
+            let wait = Int(retryDate.timeIntervalSinceNow)
+            NSLog("🚫 Server backoff active, skipping fetch (\(wait)s remaining)")
+            return
+        }
+
+        // Cooldown: don't hit API if we just tried recently
+        let now = Date()
+        if let lastAttempt = lastFetchAttempt,
+           now.timeIntervalSince(lastAttempt) < fetchCooldown {
+            let wait = Int(fetchCooldown - now.timeIntervalSince(lastAttempt))
+            NSLog("⏳ Cooldown active, skipping fetch (\(wait)s remaining)")
+            return
+        }
+
         isLoading = true
         errorMessage = nil
+        lastFetchAttempt = Date()
+        UserDefaults.standard.set(Date(), forKey: "cached_last_fetch_attempt")
 
         // Extract org ID from cookie
         fetchOrganizationId { [weak self] orgId in
@@ -455,6 +584,7 @@ class UsageManager: ObservableObject {
                 DispatchQueue.main.async {
                     self?.errorMessage = "Could not get org ID from cookie"
                     self?.isLoading = false
+                    self?.handleFailure()
                 }
                 return
             }
@@ -470,12 +600,14 @@ class UsageManager: ObservableObject {
             DispatchQueue.main.async {
                 self.errorMessage = "Invalid URL"
                 self.isLoading = false
+                self.handleFailure()
             }
             return
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 15
 
         // Use the full cookie string (user provides all cookies, not just sessionKey)
         request.setValue(sessionCookie, forHTTPHeaderField: "Cookie")
@@ -495,26 +627,67 @@ class UsageManager: ObservableObject {
                 if let error = error {
                     NSLog("❌ Error: \(error.localizedDescription)")
                     self?.errorMessage = "Network error"
+                    self?.handleFailure()
                     self?.updateStatusBar()
                     return
                 }
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     self?.errorMessage = "Invalid response"
+                    self?.handleFailure()
                     self?.updateStatusBar()
                     return
                 }
 
                 NSLog("📡 Status: \(httpResponse.statusCode)")
 
-                if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                    NSLog("📦 Response: \(responseString)")
+                if httpResponse.statusCode != 200, let data = data, let responseString = String(data: data, encoding: .utf8) {
+                    let truncated = String(responseString.prefix(200))
+                    NSLog("📦 Error response: \(truncated)")
                 }
 
-                if httpResponse.statusCode == 200, let data = data {
-                    self?.parseUsageData(data)
-                } else {
+                switch httpResponse.statusCode {
+                case 200:
+                    if let data = data, self?.parseUsageData(data) == true {
+                        self?.saveCacheToDefaults()
+                        self?.handleSuccess()
+                    } else {
+                        self?.handleFailure()
+                    }
+
+                case 401:
+                    // Auth failure — stop polling, don't waste requests with a bad cookie
+                    self?.errorMessage = "Session expired"
+                    self?.refreshTimer?.invalidate()
+                    NSLog("🔒 Auth failed, stopping timer")
+
+                case 403:
+                    // Likely Cloudflare challenge — transient, backoff and retry
+                    self?.errorMessage = "Blocked (Cloudflare) – retrying"
+                    self?.handleFailure()
+
+                case 429:
+                    // Parse Retry-After header (seconds or HTTP-date)
+                    var retryAfter: TimeInterval? = nil
+                    if let retryHeader = httpResponse.value(forHTTPHeaderField: "Retry-After") {
+                        if let seconds = TimeInterval(retryHeader) {
+                            retryAfter = seconds
+                        } else {
+                            // Try parsing as HTTP-date
+                            let formatter = DateFormatter()
+                            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                            formatter.locale = Locale(identifier: "en_US_POSIX")
+                            if let date = formatter.date(from: retryHeader) {
+                                retryAfter = max(date.timeIntervalSinceNow, 60)
+                            }
+                        }
+                    }
+                    self?.errorMessage = "Rate limited – backing off"
+                    self?.handleFailure(retryAfterSeconds: retryAfter)
+
+                default:
                     self?.errorMessage = "HTTP \(httpResponse.statusCode)"
+                    self?.handleFailure()
                 }
 
                 self?.updateStatusBar()
@@ -522,11 +695,12 @@ class UsageManager: ObservableObject {
         }.resume()
     }
 
-    func parseUsageData(_ data: Data) {
+    @discardableResult
+    func parseUsageData(_ data: Data) -> Bool {
         do {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 errorMessage = "Invalid JSON"
-                return
+                return false
             }
 
             NSLog("📊 Parsing usage data...")
@@ -596,9 +770,11 @@ class UsageManager: ObservableObject {
 
             // Update percentage values for progress bars
             updatePercentages()
+            return true
         } catch {
             NSLog("❌ Parse error: \(error.localizedDescription)")
             errorMessage = "Parse error"
+            return false
         }
     }
 
