@@ -615,9 +615,31 @@ returning `429` for several minutes, and read-only forfeits the refresh mitigati
 - Honour `Retry-After` (seconds **or** HTTP-date) with a 60s floor.
 - Backoff, cooldown, and interval state are **per account** — one rate-limited
   account must never stall the others.
-- The actual `429` threshold will be **measured during implementation** and the
-  starting interval revised if 5 min proves untenable; the measured figure is recorded
-  in this spec so the chosen cadence stays traceable to evidence.
+- **MEASURED, 2026-07-23** (task 7), against the real endpoint with the default
+  profile's live access token, one account, stopping at the first refusal:
+
+  | # | t | status |
+  |---|---|---|
+  | 1–5 | 0.0s → 10.7s | `200` |
+  | 6 | 13.3s | `429`, `Retry-After: 300` |
+
+  **Five requests are tolerated per access token; the stated penalty span is 300
+  seconds.** The 5-minute base interval therefore stands unrevised — it spends one of
+  those five, leaving four for manual refreshes, the authentication re-read retry, and
+  a second account sharing the same credential. The **budget is 5 requests per 300s
+  rolling, per credential**, which is the measurement expressed directly.
+  The probe deliberately did **not** characterise the sustained rate or the recovery
+  curve: every further request spends a real account's real allowance, and the burst
+  ceiling is what the budget needs.
+
+  **What the budget actually enforces today, measured by removing it from the admission
+  gate:** one account is capped at 5 requests per 300s *by the 60-second floor alone*,
+  with or without the budget — the floor and the measured capacity coincide. The budget
+  only does work from the second account onwards (2 accounts: 5 with, 10 without;
+  4 accounts: 5 with, 20 without). It is still the correct construct — it is what makes
+  the limit credential-scoped, and the floor is not a general guarantee since the
+  authentication re-read is deliberately exempt from it — but the floor, not the budget,
+  is what holds the single-account case to the measured threshold.
 
 Caching: last good `Snapshot` persisted per account. On failure, present
 `.stale(snapshot, since:)` with an "as of HH:mm" label rather than blanking. A

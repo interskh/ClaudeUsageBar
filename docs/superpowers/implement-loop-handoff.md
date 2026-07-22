@@ -202,6 +202,16 @@ for task 7: key the request budget on the **service name** carried by
 `ResolvedClaudeProfile`, which is correct regardless, rather than writing a test for a
 scenario that cannot occur.
 
+> **Corrected in task 7 — the recommendation named the wrong identifier.** The service
+> name is a digest of a configuration *path*; §6 scopes the budget to the *access token*,
+> which is what upstream throttles. Two directories holding the same credential — a copied
+> configuration, the scenario §6 names — resolve to two service names and would each be
+> granted a full allowance: ten requests per 300s against the one limit that binds. Task 7
+> keys the ledger on the **credential digest** §6 already compares for change detection,
+> keeping the service name only as a namespaced fallback when there is no credential to
+> digest. The digest rotates with the token, so a rotation *migrates* the ledger rather
+> than reissuing it. The scenario is reachable and is now tested.
+
 **Touches:** `Credentials/{KeychainStore,ClaudeProfileDiscovery,SystemProfileFileSystem}
 .swift`, `Tests/ClaudeProfileDiscoveryTests.swift`, `Tests/Fixtures/anthropic/*`,
 `build.sh` (shared surface: `APP_ONLY_FILES`, `IMPURE_PATTERNS`, `collect_swift`'s
@@ -456,3 +466,159 @@ reach a log through a failed assertion's diagnostic.
 `Credentials/{ClaudeProfileDiscovery,SystemProfileFileSystem}.swift` (the shared
 `ProfileFileSystem` surface — see above), `Tests/main.swift`. 484 checks.
 `build.sh` untouched: both new files are pure.
+
+---
+
+## Task 7 — `UsageStore`: registry, adaptive polling, backoff, caching
+
+The orchestration core, and the largest task in the run. The single owner that discovers
+accounts, drives both providers, applies the rate-limit policy, caches, persists, and
+projects the menu-bar figure. Two full review rounds (4 CRITICAL + 6 MAJOR reconciled
+from a fresh reviewer and codex; then a verifier FAIL on an unbounded-growth path the
+first fix round introduced). 484 → 800 checks.
+
+**The dominant failure of this run recurred here for the third and fourth time: a
+structural guarantee is only as wide as the layer it is installed in.** `Snapshot.binding
+Utilization` guarantees that an unknown *active* window makes the aggregate unknown rather
+than falling through to a lower known figure — the guardrail against manufactured
+headroom. `contributingWindows` deleted over-horizon windows *before* the fold, so the
+guarantee never saw them: the menu bar read a stale account at a green 10% while the same
+account's own card read unknown, with the real 95% figure nowhere. Reachability was not
+exotic — `CacheHorizon.sessionHorizon` and the interval ladder's top rung are the same
+number (1800), so a throttled account sits past its session horizon for much of every
+cycle. Fixed by folding the *projected* window list (suppressed windows → `.unknown`) and
+using the non-suppressed set only to decide whether the account contributes at all.
+
+**Decision: the pure engine lives in `Model/`, the impure shell in `Core/`.** `Core/` is
+app-only and is compiled into *no* test target, so policy written there is untestable.
+The interval ladder, per-credential request budget, cache horizon, backoff, and the whole
+registry/lifecycle live in `Model/{UsagePolicy,UsageEngine,UsagePersistence}.swift` with
+`now` injected everywhere; `Core/UsageStore.swift` is the transport shell (clock, two
+timers, `UserDefaults`, concrete providers). This is the main architectural choice of the
+task and it is what let the budget and state machine be mutation-tested at all.
+
+**The measured `429` threshold (§6, recorded in the spec).** One real account, stopping
+at the first refusal: requests 1–5 returned `200` over 10.7s; request 6 at t+13.3s
+returned `429` with `Retry-After: 300`. Budget = **5 requests / 300s rolling, per
+credential** — the measurement expressed directly. The sustained rate and recovery curve
+were deliberately *not* characterised: every further request spends a real account's real
+allowance, and the burst ceiling is what the budget needs. **Honest qualification the
+verifier forced into the spec:** the `PollSchedule.manualFloor` (60s) *alone* caps a
+single account at 5/300s, so the credential-scoped budget only does work at ≥2 accounts
+sharing a credential (measured: 2 → 5 with / 10 without; 4 → 5 / 20). The budget is the
+correct construct — and the `.retry` floor exemption means the floor is not a general
+guarantee — but the floor, not the budget, holds the single-account case today.
+
+**Decision: the request budget keys on the credential DIGEST, not the service name.**
+Task 4's handoff recommended the service name; that recommendation named the wrong
+identifier and is corrected inline above. The service name digests a configuration *path*;
+§6 scopes the budget to the *access token*, which is what upstream throttles. Key is
+`digest:<credentialDigest>` with `location:<service>` as a namespaced fallback. A rotation
+*migrates* the ledger rather than reissuing it.
+
+**Decision: a spend carries the account that made it, and `merge` is a multiset union.**
+The fix round's first attempt at credential-scoped budgeting introduced an unbounded-growth
+path: `rekeyBudget` merged the old ledger into the new key without clearing the old, and
+`reclaimUnreferencedBudgets` retains an unreferenced-but-non-empty ledger — each correct
+alone, but an identity flipping `P → Q → P` merged its spends into themselves, growing the
+persisted `UserDefaults` payload Fibonacci-style to ~700 MB at a 5s flip cadence (the
+verifier's suite *hung* reproducing it). **Rejected: a plain set union** — it collapses a
+genuine repeat spend, and the floor-exempt auth re-read lets one account legitimately spend
+twice at one instant; deduping those under-counts, which *admits an extra request*.
+**Rejected: a timestamp-only key** — two accounts spending at one instant are two real
+requests it would collapse into one. The account must be in the identity. **Rejected:
+clearing `budgets[oldKey]` on migration** — it hands a fresh allowance to a sibling that
+shares the credential but has not yet observed the rotation, reopening the hole
+`rekeyBudget` exists to close. The multiset union keeping the max count per identity makes
+merging a ledger into a copy of itself idempotent.
+
+**Decision: fetch completions carry a monotonic engine-wide claim token.** A per-account
+counter is provably insufficient — after drop-and-rediscovery under the same identity, the
+reborn account's counter restarts and a stale completion looks current. `finish(task,…)`
+rejects any completion whose token is not current, closing the ABA where a completion
+arriving after the 180s expiry, after disablement, or after a re-identification overwrites
+newer state.
+
+**Decision: an authentication rejection is disambiguated before it can stop a timer.**
+The token rotates ~8-hourly and is re-read every fetch, so a rejection is ambiguous. One
+immediate re-read and retry follows — **exempt from the 60s manual floor** because §6
+mandates it be immediate (a genuine manual refresh at the same instant is still floored).
+Only a *second consecutive* rejection with a stored expiry that has genuinely passed stops
+the timer; any non-auth outcome in between resets the counter, so a transient transport
+failure cannot turn two non-consecutive rejections into a stop.
+
+**Decision: a stopped account is revived by observing a credential-digest change**, which
+costs no upstream request and so keeps running under the budget even for stopped accounts.
+The first observation after a relaunch **arms without firing** — an earlier fix deleted the
+`hasObservedCredential` gate to make a re-login visible and thereby regressed the stagger
+(every new account's digest "changes" from nothing, so all armed at once); withholding
+*arming* on a first observation while still clearing the stop satisfies both.
+
+**Decision: `UsageEngine` is `@MainActor`.** §6's single-writer requirement is now
+compiler-checked rather than asserted in a comment — the same class of gap task 6's
+`readFile` lesson was about. Verified with `-strict-concurrency=complete`: zero diagnostics
+in the four new files.
+
+**Buildability was a hard gate.** `Core/UsageStore.swift` (the cookie-era `UsageManager`)
+was renamed to `Core/LegacyUsageManager.swift` byte-for-byte so all five legacy call sites
+(`AppDelegate`, `MenuBarController`, `PopoverView`, `Notifier`, `Settings`) keep compiling;
+the new `UsageStore` type does not collide with the old `UsageManager` name. Every commit
+in this run must leave a buildable app, and `build.sh --test` cannot catch a break in
+`Core/` (app-only, uncompiled by the test target) — `swiftc -typecheck` over all six
+directories is the gate that does.
+
+### The surface tasks 8–13 consume
+
+**`UsageStore` (`@MainActor`, `Core/UsageStore.swift`).**
+- `@Published private(set) var accounts: [AccountPresentation]`, `var menuBar:
+  [ProviderFigure]`, `var lastSuccessAt: Date?` — the only things §7 renders, all engine
+  projections under one consistent view, never assembled by the UI.
+- `AccountPresentation`: `ref`, `state: AccountState` (**already horizon-projected** —
+  over-horizon windows read `.unknown`), `isEnabled`, `isPollingStopped`, `lastSuccessAt`,
+  `degradationNote: String?` (e.g. "rate limited · checking every 20 min"),
+  `nextPollAt: Date?`, `warnings: [String]`.
+- `ProviderFigure`: `provider`, `utilization`, `accountLabel`, `windowLabel` (the last two
+  are the tooltip source).
+- Methods: `start()`, `stop()`, `popoverWillOpen()` (**throttled — 5s survey floor**),
+  `refresh()`, `refresh(_ identity:)`, `setEnabled(_:for:)`, `isEnabled(_:)`,
+  `retainedRawBody(for:)` (§5 diagnostic, deliberately NOT on `AccountPresentation` — no
+  display path may read it), and `registeredLocations` get/set (§4.1 escape hatch, task 11
+  owns the UI).
+
+**Task 8 (notifier):** key threshold state on `AccountIdentity.storageKey` so the engine's
+lifecycle reclaims it as a unit. Treat `index:n` (Anthropic) and `dup:<ordinal>` (Codex)
+`WindowID`s as **intentionally volatile across polls** — persisting threshold state keyed
+on them will re-fire the ladder on reorder; that is the accepted trade (an under-report is
+the failure to prevent, a re-fired ladder is noise), but task 8 must not treat a volatile
+id as stable identity.
+
+**Version-2 payload contract:** `PersistedAccountState` (v2) and
+`PersistedCredentialLedger` (v2) both go through `PersistedCodec`, which returns `nil` on a
+version mismatch or corrupt bytes; `PersistedStore.load` partitions the keyspace and
+returns `unreadable` keys for reclamation (closing the third orphan class — undecodable
+keys that a live-account sweep structurally cannot reach). Ledgers live under a
+`credential:` namespace, accounts under `usage.v2.account.`, index at `usage.v2.accounts`.
+A version-1 payload from an earlier build is unreadable and reclaimed at load.
+
+**`Core/LegacyUsageManager.swift` must be DELETED by task 11** with its last call site.
+Task 9's first step is `@MainActor` on `AppDelegate` (or `MainActor.assumeIsolated` at the
+call site), because `UsageStore` is `@MainActor`.
+
+### Carried forward
+
+- **`spend.percent` remains a v1.3.2 regression** (task 5's note stands): the extra-usage
+  bar rendered from it has no home in the `Spend` shape. Tasks 10–11 decide model-change
+  vs UI-derivation.
+- **Write amplification for tasks 9–10 to watch:** `ingest` persists every account on every
+  60s survey regardless of change; `publish` reassigns both `@Published` arrays every 15s
+  with non-`Equatable` payloads, so SwiftUI invalidates unconditionally.
+- One theoretical orphan class left open and recorded: an account whose provider left
+  `providerOrder` would never be surveyed and so never reclaimed — unreachable while both
+  providers always survey together.
+
+**Touches:** new `Model/{UsagePolicy,UsageEngine,UsagePersistence}.swift`,
+`Core/UsageStore.swift`, `Tests/UsageEngineTests.swift`. Renamed
+`Core/UsageStore.swift` → `Core/LegacyUsageManager.swift` (byte-identical + header).
+Modified: `Tests/main.swift`, spec §6 (measured threshold + the single-account
+qualification), and the task 4 budget-key correction above. 800 checks.
+`build.sh` untouched: the engine is pure, the shell is already app-only `Core/`.

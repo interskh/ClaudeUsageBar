@@ -1,608 +1,370 @@
-import SwiftUI
-import AppKit
+import Foundation
+import Combine
 
-class UsageManager: ObservableObject {
-    @Published var sessionUsage: Int = 0
-    @Published var sessionLimit: Int = 100
-    @Published var weeklyUsage: Int = 0
-    @Published var weeklyLimit: Int = 100
-    @Published var weeklySonnetUsage: Int = 0
-    @Published var weeklySonnetLimit: Int = 100
-    @Published var weeklyFableUsage: Int = 0
-    @Published var weeklyFableLimit: Int = 100
-    // Extra usage spend (from /overage_spend_limit). Shown only when there's spend.
-    @Published var extraSpentMinor: Int = 0
-    @Published var extraLimitMinor: Int = 0
-    @Published var extraResetsAt: Date?
-    @Published var freeCreditsMinor: Int = 0   // remaining free/promo credits (/prepaid/credits)
-    @Published var creditCurrency: String = "USD"
-    @Published var hasCreditUsage: Bool = false
-    @Published var sessionResetsAt: Date?
-    @Published var weeklyResetsAt: Date?
-    @Published var weeklySonnetResetsAt: Date?
-    @Published var weeklyFableResetsAt: Date?
-    @Published var lastUpdated: Date = Date()
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String?
-    @Published var notificationsEnabled: Bool = true
-    @Published var openAtLogin: Bool = false
-    @Published var hasWeeklySonnet: Bool = false
-    @Published var hasWeeklyFable: Bool = false
-    @Published var hasFetchedData: Bool = false
-    @Published var isAccessibilityEnabled: Bool = false
-    @Published var shortcutEnabled: Bool = true
+// The impure SHELL around `UsageEngine` (§6). It owns exactly the four things the engine
+// must not: the clock, the timers, the defaults database, and the concrete providers
+// that reach the network and the credential store. Every policy decision — when to
+// fetch, whether the budget allows it, how far to back off, what a row displays, what
+// the menu bar shows, when persisted state is reclaimed — lives in `Model/UsageEngine`
+// and `Model/UsagePolicy`, which compile into the test target. Nothing below decides
+// anything; it transports.
+//
+// The split exists because `Core/` is app-only: a policy engine written here would be
+// compiled by no test target at all, and §6 is the section of this design with the most
+// failure modes that only appear on a timeline hours long.
+//
+// SINGLE WRITER (§6): the store is confined to the main actor, so however many fetches
+// are in flight, every registry mutation and every menu-bar recomputation happens one at
+// a time. Fetches themselves are `nonisolated async` on the providers and run off the
+// main actor; only their results come back here.
+@MainActor
+final class UsageStore: ObservableObject {
+    // What §7 reads. Both are projections the engine computed under one consistent view
+    // of the registry — never assembled piecemeal by the UI.
+    @Published private(set) var accounts: [AccountPresentation] = []
+    @Published private(set) var menuBar: [ProviderFigure] = []
+    @Published private(set) var lastSuccessAt: Date?
 
-    private var statusItem: NSStatusItem?
-    private var sessionCookie: String = ""
-    private weak var delegate: AppDelegate?
-    var lastNotifiedThreshold: Int = 0
+    // How often the engine is ASKED whether anything is due. Not a polling interval:
+    // the intervals are per account and live in the engine, and this only bounds how
+    // late a due fetch can be.
+    static let tickInterval: TimeInterval = 15
+    // §6: discovery re-runs on a schedule, not only at launch, and doubles as the
+    // credential observation that revives a stopped account. Local and cheap — it costs
+    // no upstream request, which is what makes it safe under a rate-limit budget.
+    static let surveyInterval: TimeInterval = 60
+    // The floor between two surveys triggered by the user rather than by the timer. A
+    // survey is local and costs no upstream request, but it performs one blocking
+    // credential read per profile and it lands its results on the main actor — so an
+    // unthrottled survey per popover open lets a user drive main-actor work as fast as
+    // they can click, on a path task 9 is about to wire to a real UI. Five seconds is
+    // below the interval at which a profile's discovery state can meaningfully change
+    // and far above the rate a person can open a popover.
+    static let userSurveyFloor: TimeInterval = 5
 
-    // Rate limiting / backoff state
-    private var refreshTimer: Timer?
-    private var consecutiveFailures: Int = 0
-    private let baseInterval: TimeInterval = 300 // 5 minutes
-    private let maxInterval: TimeInterval = 1800 // 30 minutes cap
-    private var retryAfterDate: Date?
-    private var lastFetchAttempt: Date?
-    private let fetchCooldown: TimeInterval = 60 // Don't hit API more than once per minute
+    static let persistencePrefix = "usage.v2.account."
+    static let persistenceIndexKey = "usage.v2.accounts"
+    static let registeredLocationsKey = "registered_config_directories"
 
-    init(statusItem: NSStatusItem?, delegate: AppDelegate? = nil) {
-        self.statusItem = statusItem
-        self.delegate = delegate
-        loadSessionCookie()
-        loadSettings()
-        loadCachedUsage()
-        checkAccessibilityStatus()
-    }
+    private let defaults: UserDefaults
+    private let engine: UsageEngine
+    private let anthropic: AnthropicProvider
+    private let codex: CodexProvider
+    private var tickTimer: Timer?
+    private var surveyTimer: Timer?
+    private var isSurveying = false
+    private var lastSurveyStartedAt: Date?
 
-    func loadSessionCookie() {
-        if let savedCookie = UserDefaults.standard.string(forKey: "claude_session_cookie") {
-            sessionCookie = savedCookie
-        }
-    }
-
-    func saveSessionCookie(_ cookie: String) {
-        NSLog("ClaudeUsage: Saving cookie, length: \(cookie.count)")
-        sessionCookie = cookie
-        UserDefaults.standard.set(cookie, forKey: "claude_session_cookie")
-        UserDefaults.standard.synchronize()
-        NSLog("ClaudeUsage: Cookie saved successfully")
-    }
-
-    func clearSessionCookie() {
-        NSLog("ClaudeUsage: Clearing cookie")
-        sessionCookie = ""
-        UserDefaults.standard.removeObject(forKey: "claude_session_cookie")
-        UserDefaults.standard.synchronize()
-
-        // Reset all data
-        sessionUsage = 0
-        weeklyUsage = 0
-        weeklySonnetUsage = 0
-        weeklyFableUsage = 0
-        sessionResetsAt = nil
-        weeklyResetsAt = nil
-        weeklySonnetResetsAt = nil
-        weeklyFableResetsAt = nil
-        extraSpentMinor = 0
-        extraLimitMinor = 0
-        extraResetsAt = nil
-        freeCreditsMinor = 0
-        hasCreditUsage = false
-        hasFetchedData = false
-        hasWeeklySonnet = false
-        hasWeeklyFable = false
-        errorMessage = nil
-        lastNotifiedThreshold = 0
-        UserDefaults.standard.set(0, forKey: "last_notified_threshold")
-
-        // Reset rate limiting state
-        consecutiveFailures = 0
-        retryAfterDate = nil
-        lastFetchAttempt = nil
-        refreshTimer?.invalidate()
-
-        // Update status bar to show 0%
-        delegate?.updateStatusIcon(percentage: 0)
-
-        NSLog("ClaudeUsage: Cookie cleared, data reset")
-    }
-
-    // MARK: - Usage Cache (survives app restarts)
-
-    private func loadCachedUsage() {
-        let defaults = UserDefaults.standard
-
-        // Always restore last fetch timestamp (even without cached data)
-        // so cooldown works across restarts
-        if let ts = defaults.object(forKey: "cached_last_fetch_attempt") as? Date {
-            lastFetchAttempt = ts
-            NSLog("⏱️ Last fetch attempt was \(Int(Date().timeIntervalSince(ts)))s ago")
-        }
-
-        guard defaults.bool(forKey: "has_cached_usage") else { return }
-
-        sessionUsage = defaults.integer(forKey: "cached_session_usage")
-        weeklyUsage = defaults.integer(forKey: "cached_weekly_usage")
-        weeklySonnetUsage = defaults.integer(forKey: "cached_weekly_sonnet_usage")
-        hasWeeklySonnet = defaults.bool(forKey: "cached_has_weekly_sonnet")
-        hasFetchedData = true
-
-        if let ts = defaults.object(forKey: "cached_last_updated") as? Date {
-            lastUpdated = ts
-        }
-
-        NSLog("📦 Loaded cached usage: session \(sessionUsage)%, weekly \(weeklyUsage)%")
-        updateStatusBar()
-    }
-
-    private func saveCacheToDefaults() {
-        let defaults = UserDefaults.standard
-        defaults.set(true, forKey: "has_cached_usage")
-        defaults.set(sessionUsage, forKey: "cached_session_usage")
-        defaults.set(weeklyUsage, forKey: "cached_weekly_usage")
-        defaults.set(weeklySonnetUsage, forKey: "cached_weekly_sonnet_usage")
-        defaults.set(hasWeeklySonnet, forKey: "cached_has_weekly_sonnet")
-        defaults.set(lastUpdated, forKey: "cached_last_updated")
-    }
-
-    // MARK: - Timer & Backoff Management
-
-    func startRefreshTimer() {
-        scheduleTimer(interval: baseInterval)
-    }
-
-    private func scheduleTimer(interval: TimeInterval) {
-        let schedule = { [weak self] in
-            self?.refreshTimer?.invalidate()
-            self?.refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-                self?.fetchUsage()
-            }
-            NSLog("⏱️ Next fetch in \(Int(interval))s")
-        }
-        if Thread.isMainThread {
-            schedule()
-        } else {
-            DispatchQueue.main.async(execute: schedule)
-        }
-    }
-
-    private func currentBackoffInterval() -> TimeInterval {
-        guard consecutiveFailures > 0 else { return baseInterval }
-        // Cap exponent to prevent overflow (2^10 = 1024x, way past maxInterval)
-        let clampedFailures = min(consecutiveFailures, 10)
-        let backoff = baseInterval * pow(2.0, Double(clampedFailures - 1))
-        return min(backoff, maxInterval)
-    }
-
-    private func handleSuccess() {
-        consecutiveFailures = 0
-        retryAfterDate = nil
-        scheduleTimer(interval: baseInterval)
-    }
-
-    private func handleFailure(retryAfterSeconds: TimeInterval? = nil) {
-        consecutiveFailures += 1
-        let minInterval: TimeInterval = 60 // Never retry faster than 1 minute
-
-        let interval: TimeInterval
-        if let retryAfter = retryAfterSeconds, retryAfter >= minInterval {
-            // Server told us exactly how long to wait (and it's reasonable)
-            interval = retryAfter
-            retryAfterDate = Date().addingTimeInterval(retryAfter)
-            NSLog("⏳ Rate limited, server says retry after \(Int(retryAfter))s")
-        } else {
-            // Use exponential backoff (also covers Retry-After: 0 or missing header)
-            interval = max(currentBackoffInterval(), minInterval)
-            NSLog("⏳ Failure #\(consecutiveFailures), backing off to \(Int(interval))s")
-        }
-
-        scheduleTimer(interval: interval)
-    }
-
-    func fetchOrganizationId(completion: @escaping (String?) -> Void) {
-        // Get org ID from the lastActiveOrg cookie value
-        let cookieParts = sessionCookie.components(separatedBy: ";")
-        for part in cookieParts {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("lastActiveOrg=") {
-                let orgId = trimmed.replacingOccurrences(of: "lastActiveOrg=", with: "")
-                NSLog("📋 Found org ID in cookie: \(orgId)")
-                completion(orgId)
-                return
-            }
-        }
-
-        // If not in cookie, fetch from bootstrap
-        guard let url = URL(string: "https://claude.ai/api/bootstrap") else {
-            completion(nil)
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.setValue("sessionKey=\(sessionCookie)", forHTTPHeaderField: "Cookie")
-
-        NSLog("📡 Fetching bootstrap to get org ID...")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let account = json["account"] as? [String: Any],
-                  let lastActiveOrgId = account["lastActiveOrgId"] as? String else {
-                NSLog("❌ Could not parse org ID from bootstrap")
-                completion(nil)
-                return
-            }
-            NSLog("✅ Got org ID from bootstrap: \(lastActiveOrgId)")
-            completion(lastActiveOrgId)
-        }.resume()
-    }
-
-    func fetchUsage() {
-        guard !sessionCookie.isEmpty else {
-            DispatchQueue.main.async {
-                self.errorMessage = "Session cookie not set"
-                self.updateStatusBar()
-            }
-            return
-        }
-
-        // Prevent concurrent requests
-        guard !isLoading else {
-            NSLog("⚠️ Fetch already in progress, skipping")
-            return
-        }
-
-        // Respect server-requested backoff (from 429 Retry-After)
-        if let retryDate = retryAfterDate, Date() < retryDate {
-            let wait = Int(retryDate.timeIntervalSinceNow)
-            NSLog("🚫 Server backoff active, skipping fetch (\(wait)s remaining)")
-            return
-        }
-
-        // Cooldown: don't hit API if we just tried recently
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         let now = Date()
-        if let lastAttempt = lastFetchAttempt,
-           now.timeIntervalSince(lastAttempt) < fetchCooldown {
-            let wait = Int(fetchCooldown - now.timeIntervalSince(lastAttempt))
-            NSLog("⏳ Cooldown active, skipping fetch (\(wait)s remaining)")
+        // The whole persisted keyspace, partitioned by a PURE function so that the load
+        // path — including what is unreadable and must therefore be reclaimed — is
+        // covered by the test target rather than living only here, where nothing
+        // compiles it.
+        let contents = PersistedStore.load(
+            index: defaults.stringArray(forKey: UsageStore.persistenceIndexKey) ?? []
+        ) { defaults.data(forKey: UsageStore.persistencePrefix + $0) }
+        // The probe captures NOTHING but a defaults read: it is called from inside the
+        // engine on a second authentication rejection, and it must re-read the credential
+        // AT THAT MOMENT (§6) rather than reuse the last survey's copy, which is exactly
+        // the stale reading the re-read exists to rule out.
+        self.engine = UsageEngine(
+            providerOrder: [.anthropic, .codex],
+            restoring: contents.accounts,
+            restoringLedgers: contents.ledgers,
+            now: now,
+            credentialProbe: { ref in
+                UsageStore.credentialFact(
+                    for: ref,
+                    registeredLocations: UsageStore.registeredLocations(in: defaults)
+                )
+            }
+        )
+        let http = FoundationHTTPClient()
+        self.anthropic = AnthropicProvider(
+            discovery: UsageStore.makeDiscovery(),
+            http: http,
+            agentVersion: AgentVersionCache(probe: InstalledAgentVersionProbe()),
+            registeredLocations: { UsageStore.registeredLocations(in: defaults) }
+        )
+        self.codex = CodexProvider(reader: UsageStore.makeCodexReader(), http: http)
+        // A key the index names but this build cannot read — corrupt bytes, or a payload
+        // written by a version with a different shape — never becomes an account payload,
+        // so it never enters the engine's unclaimed map and the engine's orphan sweep
+        // structurally cannot reach it. Left alone, the index keeps naming it and its blob
+        // keeps sitting there forever. It is reclaimed HERE, at the one layer that can see
+        // it, and the state it held is lost deliberately: it was already unreadable.
+        reclaim(contents.unreadable)
+    }
+
+    private func reclaim(_ storageKeys: [String]) {
+        guard !storageKeys.isEmpty else { return }
+        var index = Set(defaults.stringArray(forKey: UsageStore.persistenceIndexKey) ?? [])
+        for key in storageKeys {
+            defaults.removeObject(forKey: UsageStore.persistencePrefix + key)
+            index.remove(key)
+            NSLog("🧹 Discarded unreadable persisted state for %@", key)
+        }
+        defaults.set(index.sorted(), forKey: UsageStore.persistenceIndexKey)
+    }
+
+    deinit {
+        tickTimer?.invalidate()
+        surveyTimer?.invalidate()
+    }
+
+    // MARK: - Lifecycle
+
+    func start() {
+        guard tickTimer == nil else { return }
+        survey()
+        tickTimer = Timer.scheduledTimer(withTimeInterval: UsageStore.tickInterval,
+                                         repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pump() }
+        }
+        surveyTimer = Timer.scheduledTimer(withTimeInterval: UsageStore.surveyInterval,
+                                           repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.survey() }
+        }
+    }
+
+    func stop() {
+        tickTimer?.invalidate()
+        tickTimer = nil
+        surveyTimer?.invalidate()
+        surveyTimer = nil
+    }
+
+    // §6: discovery re-runs on popover open as well as on its timer — profiles are
+    // created and signed out while the app is running. Throttled, because this one is
+    // driven by the user: see `userSurveyFloor`.
+    func popoverWillOpen() {
+        survey(notBefore: UsageStore.userSurveyFloor)
+        pump()
+    }
+
+    // §6's manual Refresh. It bypasses the interval and NOTHING else: the same admission
+    // gate applies, so the 60s floor and the credential budget still bind.
+    func refresh() {
+        let now = Date()
+        engine.requestManualRefresh(now: now)
+        pump(now: now)
+    }
+
+    func refresh(_ identity: AccountIdentity) {
+        let now = Date()
+        engine.requestManualRefresh(identity, now: now)
+        pump(now: now)
+    }
+
+    func setEnabled(_ enabled: Bool, for identity: AccountIdentity) {
+        engine.setEnabled(enabled, for: identity)
+        flush()
+        publish(now: Date())
+    }
+
+    func isEnabled(_ identity: AccountIdentity) -> Bool { engine.isEnabled(identity) }
+
+    // §5: diagnostic-only, latest per account, and deliberately not on
+    // `AccountPresentation` so no display path can reach it.
+    func retainedRawBody(for identity: AccountIdentity) -> Data? {
+        engine.retainedRawBody(for: identity)
+    }
+
+    // MARK: - Registered locations (§4.1's escape hatch; task 11 owns the UI)
+
+    var registeredLocations: [String] {
+        get { UsageStore.registeredLocations(in: defaults) }
+        set {
+            defaults.set(newValue, forKey: UsageStore.registeredLocationsKey)
+            survey()
+        }
+    }
+
+    private static func registeredLocations(in defaults: UserDefaults) -> [String] {
+        defaults.stringArray(forKey: registeredLocationsKey) ?? []
+    }
+
+    // MARK: - Driving the engine
+
+    private func pump(now: Date = Date()) {
+        for task in engine.claimDueFetches(now: now) {
+            run(task)
+        }
+        flush()
+        publish(now: now)
+    }
+
+    private func run(_ task: PollTask) {
+        let provider: any UsageProvider = task.ref.provider == .anthropic ? anthropic : codex
+        Task { [weak self] in
+            // `fetch` is nonisolated and async: it runs off the main actor, so a blocking
+            // credential read inside it never stalls the menu bar. Only the result comes
+            // back here, where the single writer applies it.
+            let result = await provider.fetch(task.ref)
+            guard let self else { return }
+            let now = Date()
+            self.engine.finish(task, result, now: now)
+            self.flush()
+            self.publish(now: now)
+            // An authentication rejection queues an immediate re-read and retry (§6);
+            // waiting for the next tick would delay it by up to `tickInterval` for no
+            // reason. The retry still has to clear the 60s floor and the budget.
+            self.pump(now: now)
+        }
+    }
+
+    // §6's periodic re-discovery AND its credential observation, as one local pass. Runs
+    // off the main actor because a credential lookup blocks for as long as its own
+    // timeout, and this pass performs one per profile.
+    private func survey(notBefore floor: TimeInterval = 0) {
+        guard !isSurveying else { return }
+        let now = Date()
+        if floor > 0, let last = lastSurveyStartedAt, now.timeIntervalSince(last) < floor {
             return
         }
-
-        isLoading = true
-        errorMessage = nil
-        lastFetchAttempt = Date()
-        UserDefaults.standard.set(Date(), forKey: "cached_last_fetch_attempt")
-
-        // Extract org ID from cookie
-        fetchOrganizationId { [weak self] orgId in
-            guard let self = self, let orgId = orgId else {
-                DispatchQueue.main.async {
-                    self?.errorMessage = "Could not get org ID from cookie"
-                    self?.isLoading = false
-                    self?.handleFailure()
-                }
-                return
-            }
-
-            self.fetchUsageWithOrgId(orgId)
-            self.fetchExtraUsage(orgId)
-            self.fetchFreeCredits(orgId)
+        lastSurveyStartedAt = now
+        isSurveying = true
+        let locations = registeredLocations
+        Task { [weak self] in
+            let observations = await Task.detached(priority: .utility) {
+                UsageStore.collectObservations(registeredLocations: locations, now: Date())
+            }.value
+            guard let self else { return }
+            self.isSurveying = false
+            let now = Date()
+            // Both providers ran, so both may reclaim: a Codex configuration that has
+            // been removed yields no observation and its state is reclaimed (§6).
+            self.engine.ingest(observations, covering: [.anthropic, .codex], now: now)
+            self.flush()
+            self.publish(now: now)
+            self.pump(now: now)
         }
     }
 
-    // Remaining free/promo credits (balance) from /prepaid/credits.
-    func fetchFreeCredits(_ orgId: String) {
-        guard let url = URL(string: "https://claude.ai/api/organizations/\(orgId)/prepaid/credits") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(sessionCookie, forHTTPHeaderField: "Cookie")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Origin")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-        request.setValue("claude.ai", forHTTPHeaderField: "authority")
-
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
-            DispatchQueue.main.async {
-                guard let self = self,
-                      let http = response as? HTTPURLResponse, http.statusCode == 200,
-                      let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-                // `amount` is the current balance; fall back to summing remaining tranches.
-                if let amount = json["amount"] as? Int {
-                    self.freeCreditsMinor = amount
-                } else {
-                    var remaining = 0
-                    for key in ["tranches", "promo_tranches"] {
-                        if let arr = json[key] as? [[String: Any]] {
-                            for t in arr { remaining += (t["remaining_amount_minor_units"] as? Int) ?? 0 }
-                        }
-                    }
-                    self.freeCreditsMinor = remaining
-                }
-                if let cur = json["currency"] as? String { self.creditCurrency = cur }
-                NSLog("🎁 Free credits left: \(self.freeCreditsMinor) \(self.creditCurrency)")
-            }
-        }.resume()
+    private func publish(now: Date) {
+        accounts = engine.presentations(now: now)
+        menuBar = engine.menuBarFigures(now: now)
+        lastSuccessAt = accounts.compactMap { $0.lastSuccessAt }.max()
     }
 
-    // Extra usage spend + monthly limit live on a separate endpoint (not /usage).
-    func fetchExtraUsage(_ orgId: String) {
-        guard let url = URL(string: "https://claude.ai/api/organizations/\(orgId)/overage_spend_limit") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(sessionCookie, forHTTPHeaderField: "Cookie")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Origin")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-        request.setValue("claude.ai", forHTTPHeaderField: "authority")
+    // MARK: - Persistence
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
-            DispatchQueue.main.async {
-                guard let self = self,
-                      let http = response as? HTTPURLResponse, http.statusCode == 200,
-                      let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
-                let spent = (json["used_credits"] as? Int) ?? 0
-                let limit = (json["monthly_credit_limit"] as? Int) ?? 0
-                self.extraSpentMinor = spent
-                self.extraLimitMinor = limit
-                self.creditCurrency = (json["currency"] as? String) ?? "USD"
-                if let resetStr = json["disabled_until"] as? String {
-                    let f = ISO8601DateFormatter()
-                    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                    self.extraResetsAt = f.date(from: resetStr) ?? ISO8601DateFormatter().date(from: resetStr)
-                }
-                self.hasCreditUsage = spent > 0
-                NSLog("💳 Extra usage: \(spent)/\(limit) \(self.creditCurrency)")
+    // §6's namespacing, made real: one defaults key per account, plus an index so that a
+    // namespace whose account never comes back can be found and removed. Without the
+    // index the keyspace is unenumerable and orphans accumulate silently — which is how
+    // this machine came to hold five credential entries for directories that no longer
+    // exist.
+    private func flush() {
+        var index = Set(defaults.stringArray(forKey: UsageStore.persistenceIndexKey) ?? [])
+        for op in engine.drainPersistence() {
+            switch op {
+            case .write(let storageKey, let payload):
+                defaults.set(payload, forKey: UsageStore.persistencePrefix + storageKey)
+                index.insert(storageKey)
+            case .delete(let storageKey):
+                defaults.removeObject(forKey: UsageStore.persistencePrefix + storageKey)
+                index.remove(storageKey)
             }
-        }.resume()
+        }
+        defaults.set(index.sorted(), forKey: UsageStore.persistenceIndexKey)
     }
 
-    func fetchUsageWithOrgId(_ orgId: String) {
-        let urlString = "https://claude.ai/api/organizations/\(orgId)/usage"
+    // MARK: - The local survey (nonisolated: no shared state, safe off the main actor)
 
-        guard let url = URL(string: urlString) else {
-            DispatchQueue.main.async {
-                self.errorMessage = "Invalid URL"
-                self.isLoading = false
-                self.handleFailure()
-            }
-            return
+    private nonisolated static func makeDiscovery() -> ClaudeProfileDiscovery {
+        ClaudeProfileDiscovery(fileSystem: SystemProfileFileSystem(), credentials: KeychainStore())
+    }
+
+    private nonisolated static func makeCodexReader() -> CodexAuthReader {
+        CodexAuthReader(fileSystem: SystemProfileFileSystem())
+    }
+
+    nonisolated static func collectObservations(registeredLocations: [String],
+                                                now: Date) -> [AccountObservation] {
+        var observations: [AccountObservation] = []
+
+        // Anthropic. The service name is how the credential is ADDRESSED, and it is only
+        // the fallback budget key: it digests a configuration PATH, and §6 scopes the
+        // budget to the access token. `AccountObservation.budgetKey` prefers the
+        // credential digest for exactly that reason.
+        let discovery = makeDiscovery()
+        for profile in discovery.resolveProfiles(registeredLocations: registeredLocations,
+                                                 now: now) {
+            observations.append(AccountObservation(
+                account: profile.account,
+                credentialLocation: profile.service,
+                credential: anthropicCredentialFact(service: profile.service,
+                                                    credentials: discovery.credentials)
+            ))
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
+        // Codex. Single account (§4.2), so the credential file's path is its location.
+        let reader = makeCodexReader()
+        let codexLocation = reader.credentialPath ?? "codex"
+        for account in CodexProvider(reader: reader, http: FoundationHTTPClient())
+            .discoverAccounts() {
+            observations.append(AccountObservation(
+                account: account,
+                credentialLocation: codexLocation,
+                credential: codexCredentialFact(reader: reader)
+            ))
+        }
 
-        // Use the full cookie string (user provides all cookies, not just sessionKey)
-        request.setValue(sessionCookie, forHTTPHeaderField: "Cookie")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Origin")
-        request.setValue("https://claude.ai", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-        request.setValue("claude.ai", forHTTPHeaderField: "authority")
-
-        NSLog("🔍 Fetching from: \(urlString)")
-
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-
-                if let error = error {
-                    NSLog("❌ Error: \(error.localizedDescription)")
-                    self?.errorMessage = "Network error"
-                    self?.handleFailure()
-                    self?.updateStatusBar()
-                    return
-                }
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    self?.errorMessage = "Invalid response"
-                    self?.handleFailure()
-                    self?.updateStatusBar()
-                    return
-                }
-
-                NSLog("📡 Status: \(httpResponse.statusCode)")
-
-                if httpResponse.statusCode != 200, let data = data, let responseString = String(data: data, encoding: .utf8) {
-                    let truncated = String(responseString.prefix(200))
-                    NSLog("📦 Error response: \(truncated)")
-                }
-
-                switch httpResponse.statusCode {
-                case 200:
-                    if let data = data, self?.parseUsageData(data) == true {
-                        self?.saveCacheToDefaults()
-                        self?.handleSuccess()
-                    } else {
-                        self?.handleFailure()
-                    }
-
-                case 401:
-                    // Auth failure — stop polling, don't waste requests with a bad cookie
-                    self?.errorMessage = "Session expired"
-                    self?.refreshTimer?.invalidate()
-                    NSLog("🔒 Auth failed, stopping timer")
-
-                case 403:
-                    // Likely Cloudflare challenge — transient, backoff and retry
-                    self?.errorMessage = "Blocked (Cloudflare) – retrying"
-                    self?.handleFailure()
-
-                case 429:
-                    // Parse Retry-After header (seconds or HTTP-date)
-                    var retryAfter: TimeInterval? = nil
-                    if let retryHeader = httpResponse.value(forHTTPHeaderField: "Retry-After") {
-                        if let seconds = TimeInterval(retryHeader) {
-                            retryAfter = seconds
-                        } else {
-                            // Try parsing as HTTP-date
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-                            formatter.locale = Locale(identifier: "en_US_POSIX")
-                            if let date = formatter.date(from: retryHeader) {
-                                retryAfter = max(date.timeIntervalSinceNow, 60)
-                            }
-                        }
-                    }
-                    self?.errorMessage = "Rate limited – backing off"
-                    self?.handleFailure(retryAfterSeconds: retryAfter)
-
-                default:
-                    self?.errorMessage = "HTTP \(httpResponse.statusCode)"
-                    self?.handleFailure()
-                }
-
-                self?.updateStatusBar()
-            }
-        }.resume()
+        return observations
     }
 
-    @discardableResult
-    func parseUsageData(_ data: Data) -> Bool {
-        do {
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                errorMessage = "Invalid JSON"
-                return false
+    // The wake-up contract of §6: what is compared across polls is a DIGEST. The blob is
+    // read, hashed, and dropped in the same expression — it carries live `mcpOAuth`
+    // client secrets for unrelated third-party servers, and persisting it to diff it
+    // would be a worse exposure than the one the read-only rule prevents.
+    private nonisolated static func anthropicCredentialFact(
+        service: String,
+        credentials: ClaudeCredentialSource
+    ) -> CredentialFact {
+        switch credentials.lookupCredential(service: service) {
+        case .absent, .failed:
+            return CredentialFact()
+        case .found(let blob):
+            var expiry: Date?
+            if case .usable(let credential) = ClaudeCredential.decode(blob) {
+                expiry = credential.expiresAt
             }
-
-            NSLog("📊 Parsing usage data...")
-
-            let iso8601Formatter = ISO8601DateFormatter()
-            iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-            // Parse the actual claude.ai response format
-            if let fiveHour = json["five_hour"] as? [String: Any] {
-                if let sessionUtil = fiveHour["utilization"] as? Double {
-                    sessionUsage = Int(sessionUtil)
-                    sessionLimit = 100
-                }
-                if let resetsAtString = fiveHour["resets_at"] as? String {
-                    NSLog("🕐 Session resets_at string: \(resetsAtString)")
-                    if let resetsAt = iso8601Formatter.date(from: resetsAtString) {
-                        sessionResetsAt = resetsAt
-                        NSLog("✅ Parsed session reset time: \(resetsAt)")
-                    } else {
-                        NSLog("❌ Failed to parse session reset time")
-                    }
-                }
-            }
-
-            if let sevenDay = json["seven_day"] as? [String: Any] {
-                if let weeklyUtil = sevenDay["utilization"] as? Double {
-                    weeklyUsage = Int(weeklyUtil)
-                    weeklyLimit = 100
-                }
-                if let resetsAtString = sevenDay["resets_at"] as? String {
-                    NSLog("🕐 Weekly resets_at string: \(resetsAtString)")
-                    if let resetsAt = iso8601Formatter.date(from: resetsAtString) {
-                        weeklyResetsAt = resetsAt
-                        NSLog("✅ Parsed weekly reset time: \(resetsAt)")
-                    } else {
-                        NSLog("❌ Failed to parse weekly reset time")
-                    }
-                }
-            }
-
-            // Check for seven_day_sonnet (Pro plan feature)
-            if let sevenDaySonnet = json["seven_day_sonnet"] as? [String: Any] {
-                hasWeeklySonnet = true
-                if let sonnetUtil = sevenDaySonnet["utilization"] as? Double {
-                    weeklySonnetUsage = Int(sonnetUtil)
-                    weeklySonnetLimit = 100
-                }
-                if let resetsAtString = sevenDaySonnet["resets_at"] as? String {
-                    NSLog("🕐 Weekly Sonnet resets_at string: \(resetsAtString)")
-                    if let resetsAt = iso8601Formatter.date(from: resetsAtString) {
-                        weeklySonnetResetsAt = resetsAt
-                        NSLog("✅ Parsed weekly Sonnet reset time: \(resetsAt)")
-                    } else {
-                        NSLog("❌ Failed to parse weekly Sonnet reset time")
-                    }
-                }
-            } else {
-                hasWeeklySonnet = false
-            }
-
-            // Fable is a new, separately-counted model. It isn't a top-level
-            // key like seven_day_sonnet — it lives in the `limits` array as a
-            // model-scoped weekly limit (scope.model.display_name == "Fable").
-            // The bar is only surfaced in the UI when usage is above 1%.
-            hasWeeklyFable = false
-            if let limits = json["limits"] as? [[String: Any]] {
-                let fableLimit = limits.first { entry in
-                    let scope = entry["scope"] as? [String: Any]
-                    let model = scope?["model"] as? [String: Any]
-                    return (model?["display_name"] as? String) == "Fable"
-                }
-                if let fable = fableLimit {
-                    hasWeeklyFable = true
-                    // `percent` may decode as Int or Double depending on payload.
-                    if let p = fable["percent"] as? Int {
-                        weeklyFableUsage = p
-                    } else if let p = fable["percent"] as? Double {
-                        weeklyFableUsage = Int(p)
-                    }
-                    weeklyFableLimit = 100
-                    if let resetsAtString = fable["resets_at"] as? String {
-                        NSLog("🕐 Weekly Fable resets_at string: \(resetsAtString)")
-                        if let resetsAt = iso8601Formatter.date(from: resetsAtString) {
-                            weeklyFableResetsAt = resetsAt
-                            NSLog("✅ Parsed weekly Fable reset time: \(resetsAt)")
-                        } else {
-                            NSLog("❌ Failed to parse weekly Fable reset time")
-                        }
-                    }
-                }
-            }
-
-            // (Prepaid usage credits are fetched separately from /prepaid/credits.)
-
-            // Log what we found
-            NSLog("✅ Parsed: Session \(sessionUsage)%, Weekly \(weeklyUsage)%\(hasWeeklySonnet ? ", Weekly Sonnet \(weeklySonnetUsage)%" : "")\(hasWeeklyFable ? ", Weekly Fable \(weeklyFableUsage)%" : "")")
-
-            lastUpdated = Date()
-            errorMessage = nil
-            hasFetchedData = true
-
-            // Update percentage values for progress bars
-            updatePercentages()
-            return true
-        } catch {
-            NSLog("❌ Parse error: \(error.localizedDescription)")
-            errorMessage = "Parse error"
-            return false
+            return CredentialFact(digest: ClaudeCredential.credentialDigest(blob),
+                                  expiresAt: expiry)
         }
     }
 
-    func updateStatusBar() {
-        let sessionPercent = Int((Double(sessionUsage) / Double(sessionLimit)) * 100)
-        let weeklyPercent = Int((Double(weeklyUsage) / Double(weeklyLimit)) * 100)
-
-        delegate?.updateStatusIcon(sessionPercentage: sessionPercent, weeklyPercentage: weeklyPercent)
-
-        checkNotificationThresholds(percentage: max(sessionPercent, weeklyPercent))
+    // Same rule for Codex, through the same canonicalising digest so that "changed" means
+    // the same thing on both providers. `auth.json` publishes no expiry this app can read,
+    // so `expiresAt` stays nil — which means a Codex account is NEVER stopped as expired
+    // (§6 stops a timer only on a second rejection with a genuinely lapsed stored expiry).
+    // It backs off and keeps retrying instead, which is the correct treatment for a
+    // rejection whose cause cannot be established locally.
+    private nonisolated static func codexCredentialFact(reader: CodexAuthReader) -> CredentialFact {
+        guard let path = reader.credentialPath,
+              case .contents(let data) = reader.fileSystem.readFile(atPath: path)
+        else { return CredentialFact() }
+        return CredentialFact(digest: ClaudeCredential.credentialDigest(data))
     }
 
-    @Published var sessionPercentage: Double = 0.0
-    @Published var weeklyPercentage: Double = 0.0
-    @Published var weeklySonnetPercentage: Double = 0.0
-    @Published var weeklyFablePercentage: Double = 0.0
-
-    func updatePercentages() {
-        sessionPercentage = Double(sessionUsage) / Double(sessionLimit)
-        weeklyPercentage = Double(weeklyUsage) / Double(weeklyLimit)
-        weeklySonnetPercentage = Double(weeklySonnetUsage) / Double(weeklySonnetLimit)
-        weeklyFablePercentage = Double(weeklyFableUsage) / Double(weeklyFableLimit)
+    // Re-reads ONE account's credential, now. Used only by the engine's second-rejection
+    // test, which is why it re-runs discovery rather than consulting a cache: the whole
+    // question being asked is whether the copy we last saw is out of date.
+    nonisolated static func credentialFact(for ref: AccountRef,
+                                           registeredLocations: [String]) -> CredentialFact {
+        switch ref.provider {
+        case .anthropic:
+            let discovery = makeDiscovery()
+            guard let profile = discovery
+                .resolveProfiles(registeredLocations: registeredLocations, now: Date())
+                .first(where: { $0.account.ref.id == ref.id })
+            else { return CredentialFact() }
+            return anthropicCredentialFact(service: profile.service,
+                                           credentials: discovery.credentials)
+        case .codex:
+            return codexCredentialFact(reader: makeCodexReader())
+        }
     }
 }
