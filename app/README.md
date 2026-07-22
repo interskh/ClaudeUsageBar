@@ -13,6 +13,8 @@ A lightweight macOS menu bar app that displays your Claude.ai session and weekly
 - ⌨️ **Keyboard Shortcut**: Toggle popup with Cmd+U from anywhere
 - 🔒 **Privacy First**: All data stored locally on your Mac
 - 📊 **Pro Plan Support**: Shows weekly Sonnet usage for Pro subscribers
+- ✨ **Fable Usage**: Dedicated weekly Fable (7-day) bar, shown once Fable is used
+- 💳 **Extra Usage & Credits**: Pay-as-you-go spend and remaining free credits
 - 🎯 **Menu Bar Only**: No Dock icon, stays out of your way
 
 ## 🖼️ Screenshots
@@ -25,6 +27,8 @@ A lightweight macOS menu bar app that displays your Claude.ai session and weekly
 - Session (5-hour) usage with progress bar and reset time
 - Weekly (7-day) usage with progress bar and reset date
 - Weekly Sonnet usage (Pro plan only)
+- Weekly Fable (7-day) usage with reset date (shown once Fable is used)
+- Extra usage spend and remaining free credits
 - Settings for notifications and keyboard shortcuts
 
 ## 📋 Requirements

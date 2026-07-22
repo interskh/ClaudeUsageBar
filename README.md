@@ -31,6 +31,8 @@ A lightweight, open-source macOS menu bar application that displays your Claude.
 - ⚡ **Auto-refresh** - Updates every 5 minutes automatically
 - 🔒 **Privacy-first** - All data stored locally on your Mac
 - 📊 **Pro plan support** - Shows weekly Sonnet usage for Pro subscribers
+- ✨ **Fable usage** - Dedicated weekly Fable (7-day) bar, shown once Fable is used
+- 💳 **Extra usage & credits** - Pay-as-you-go spend and remaining free credits
 - 🎯 **Menu bar only** - No Dock icon, stays out of your way
 
 [See full feature list →](app/README.md)
@@ -54,6 +56,8 @@ A lightweight, open-source macOS menu bar application that displays your Claude.
 - Session (5-hour) usage with progress bar
 - Weekly (7-day) usage with progress bar
 - Weekly Sonnet usage (Pro plan only)
+- Weekly Fable (7-day) usage (shown once Fable is used)
+- Extra usage spend and remaining free credits
 - Settings for notifications and shortcuts
 
 ## 📁 Repository Structure
