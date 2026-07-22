@@ -234,7 +234,11 @@ protocol UsageProvider {
     var kind: ProviderKind { get }
     var presentation: ProviderPresentation { get }  // glyph, section title, sort order
     func discoverAccounts() -> [DiscoveredAccount]
-    func fetch(_ account: AccountRef) async -> Result<Snapshot, FetchError>
+    // Carries the raw payload on BOTH paths: §5 requires retaining the most recent
+    // raw response per account, and §6 forbids providers writing persisted state,
+    // so the body has to be returned rather than stored. `malformedResponse` carries
+    // it too — otherwise the diagnostic is discarded in the one case §5 built it for.
+    func fetch(_ account: AccountRef) async -> Result<FetchedSnapshot, FetchError>
 }
 ```
 
