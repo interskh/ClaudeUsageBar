@@ -740,6 +740,7 @@ app/
   UI/MenuBarController.swift
   UI/PopoverView.swift
   UI/AccountCardView.swift
+  UI/PasteableTextField.swift               # transitional; removed with the cookie UI (§7.4)
   UI/SettingsView.swift
   App/AppDelegate.swift
 ```
