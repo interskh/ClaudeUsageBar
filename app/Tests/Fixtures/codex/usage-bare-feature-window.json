@@ -1,0 +1,16 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "rate_limit": null,
+  "additional_rate_limits": [
+    {
+      "metered_feature": "codex_alpha",
+      "limit_window_seconds": 18000,
+      "used_percent": 77
+    }
+  ],
+  "credits": {
+    "balance": "0"
+  }
+}

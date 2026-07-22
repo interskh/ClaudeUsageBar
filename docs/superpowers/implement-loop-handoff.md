@@ -326,3 +326,133 @@ FoundationHTTPClient,InstalledAgentVersionProbe}.swift`,
 `Tests/AnthropicProviderTests.swift`, `Tests/Fixtures/anthropic/usage-*.json` (24).
 Modified: `Providers/UsageProvider.swift` (+8, the shared protocol — see above),
 `Tests/main.swift`, `build.sh` (`APP_ONLY_FILES`). 259 checks.
+
+---
+
+## Task 6 — `CodexAuthReader` + `CodexProvider`
+
+**The invariant was enforced better here and the bug moved upstream of the enforcement.**
+Task 5 defended "never delete a window you read" with a comment, and the comment did not
+stop a `guard … else { return nil }` nine lines away. Here `window(from:)` is
+**non-optional by signature** — enforcement by type-checker, not by reviewer vigilance.
+It worked. The worst defect of the task then landed one layer *up*, at ingestion, where
+the invariant never runs: `flatten` tested `isTemporalWindow` on an object's children and
+grandchildren but **never on the object it was handed**, so a bucket that *is* a window
+disappeared. Measured, a 91% limit rendered as an idle account; in one shape the parser
+returned one 5% window and `warnings=[]` while a 99% limit sat in a sibling group.
+
+**The transferable question is therefore not "is my projection lossless" but "is there any
+shape carrying a real figure that never becomes a window at all?"** A structural guarantee
+is only as wide as the layer it is installed in.
+
+**The dominant bug shape of this whole run: twinned branches where only one side was
+fixed or covered.** Seven instances found across tasks 5 and 6 — `scope` fixed but `kind`
+not; the group scan's object branch warning while its list branch stayed silent; depth-1
+vs depth-2 `unreadableWindow`; `rescue()`'s recoverable-vs-unrecoverable paths; `spend()`'s
+two credits guards; `genericGroup`'s object and list branches; and `spanLabel`'s ternary.
+Where two code paths do the same job, fixing or testing one is not evidence about the
+other. Several such pairs are now collapsed into single code paths so they *cannot*
+disagree.
+
+**Decision: a working token with no durable identifier is not `usable`.** Every credential
+lacking both identifiers previously keyed to one shared namespace, so two unrelated
+sign-ins inherited each other's cached usage and notification history — the exact
+misattribution §4.2 exists to prevent, and a warning does not help because the app still
+reads the wrong account's numbers. Now `.noDurableIdentity`, discovery reports `failed`,
+and `fetch` returns `.accountUnknown` before any request. **Rejected: a credential-digest
+identity** — the only remaining material rotates every 8 hours, so the key would churn on
+every rotation. **Rejected: hiding the account** — a working login rendering as nothing at
+all is worse than a named failure.
+
+**Decision: composite arity is fixed at two slots, absent half spelled empty, and the
+half-resolved case warns.** Fixed arity keeps `storageKey` stable when one half fails to
+parse. **Rejected: making the account half authoritative when the user half fails to
+*parse*** (as distinct from being absent) — it produces a key identical to the
+genuinely-absent case, so it removes no re-keying while breaking the composite. The
+residual cost is documented: a transient id_token problem re-keys the account and costs
+its history. It no longer costs the account itself (see below).
+
+**Decision: colliding `WindowID`s are made distinct, not merely announced.** Warning is
+insufficient because downstream dictionaries and §8 persistence still merge or drop one.
+Every member of a colliding group is re-keyed to `dup:<bucket-ordinal>.<path>:<scope>`;
+`dup:` is a prefix no natural id can take. **All** members re-key — letting the first keep
+the clean id would make its identity depend on another window's arrival order.
+**Consequence for task 8: `dup:` keys, like Anthropic's `index:n`, are deliberately
+volatile across polls.**
+
+**Decision: credential-fault classification happens before the identity comparison.** The
+order of two tests was the entire bug: the identity guard derived its reference from the
+credential *read result*, so every non-usable read resolved to the shared sentinel and
+returned `.accountUnknown` — which §6 treats as terminal and drops the account. **The CLI
+rewrites `auth.json` on every token rotation, so a read landing mid-write is routine.**
+The classification branches were provably unreachable: replacing both bodies with
+`fatalError` left the suite fully green. A test suite cannot fail on code that never runs.
+
+**Decision: `isActive` requires the window's own utilization to be `.known`.**
+`limit_reached` is a *bucket* flag, so it marked null-utilization windows active, and
+`bindingUtilization` returns `.unknown` if any active window is unknown — meaning the
+account that was *literally rate-limited* was the one whose figure disappeared.
+
+**Decision: identity disagreement is judged per-identifier, not by total disjointness.**
+The original `allSatisfy { !known.contains($0) }` required *complete* disjointness, so a
+response matching one half while naming a **different user** on the other produced no
+warning at all. The two-warning split is retained and correct: `ambiguousIdentifiers`
+(response reuses one value for both fields — the observed normal state, fires every poll)
+is deliberately distinct from `identityDisagreement`. Collapsing them would tell the user
+their only real Codex account does not match itself, forever, training them to ignore the
+accurate warnings.
+
+**Measured facts that corrected the spec's assumptions:**
+- **Reset times are Unix epoch integers (`reset_at`) plus a relative `reset_after_seconds`
+  — not RFC3339.** None of the sibling's ISO8601 machinery applies. The relative countdown
+  is preferred (no clock agreement needed), the epoch is the fallback, and both are read
+  because a payload dropping either must not lose its reset time.
+- **The third quota group is `code_review_rate_limit`, and it is `null` on this account.**
+  A name-based special case would look correct today and omit a live limit the day it
+  populates. It is reached only by the generic scan over every top-level value carrying
+  the window shape.
+- **The §5.2 fallback endpoint answers 403, not 404** (HTML body), so that path is
+  unexercised in production and unit-tested only.
+- Identity: `tokens.account_id == chatgpt_account_id` (UUID) while the response returns
+  `account_id == user_id == user-…`. The §4.2 disagreement is real and is the normal state.
+
+**A fix that compiled, read correctly, and did nothing.** `readFile` was first added as a
+protocol **extension** member. Swift dispatches extension members statically, so calling
+through an `any ProfileFileSystem` existential never reached the concrete filesystem's
+override — the fix was inert and invisible to inspection. A newly written test failed and
+exposed it; it is now a protocol **requirement** with a default, which puts it in the
+witness table. Verified at runtime against a 0-permission file, not merely by compiling.
+
+**On mutation survivors: distinguish a gap from an equivalent mutant.** `humanised`'s
+`!first.isEmpty` guard survives mutation and should — `split(separator:)` defaults to
+`omittingEmptySubsequences: true`, so the empty case is unreachable (measured across five
+inputs). Writing a fixture for it would inflate the count while pinning nothing. Reporting
+an unkillable mutant as unkillable is the honest answer.
+
+**Kept deliberately:** `CodexUsageParser.WarningLog` duplicates the sibling's ~9 lines.
+Both reviewers agreed to keep it; the honest argument is "below the threshold where
+abstraction pays", not "sharing is dangerous". A missing `rate_limit` fails the whole
+fetch (fail loud beats a reassuring partial read). `JSONSerialization` materialises the
+whole credential document transiently — parity with `ClaudeCredential.decode`; §6's rule
+is about *retention*, `root` is a local `let` that escapes no scope and is captured by no
+closure, and `CodexCredential` now has a redacted `description` so a bearer token cannot
+reach a log through a failed assertion's diagnostic.
+
+### Carried forward
+
+- **`ProfileFileSystem` gained a sixth member.** `readFile` + `FileReadResult` were added
+  to task 4's `ClaudeProfileDiscovery.swift` with a default implementation, and
+  `SystemProfileFileSystem.swift` gained the override. Verified additive — task 4's fake
+  conformer does not implement it and still passes on the default.
+- **`dup:` window identities are volatile across polls**, like Anthropic's `index:n`.
+  Task 8 persists threshold state keyed on `WindowID` and must treat both as intentionally
+  unstable.
+- The `404` → alternate-endpoint fallback, a `limit_reached == true` state, and windows at
+  both nesting depths in one bucket are **built and unit-tested but never observed live**;
+  they cannot be produced without vendor behaviour changing or the account being exhausted.
+
+**Touches:** new `Credentials/CodexAuthReader.swift`, `Providers/CodexProvider.swift`,
+`Tests/CodexProviderTests.swift`, `Tests/Fixtures/codex/*` (58). Modified:
+`Credentials/{ClaudeProfileDiscovery,SystemProfileFileSystem}.swift` (the shared
+`ProfileFileSystem` surface — see above), `Tests/main.swift`. 484 checks.
+`build.sh` untouched: both new files are pure.

@@ -1,0 +1,42 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window": {
+      "used_percent": 12,
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 900
+    },
+    "secondary_window": {
+      "used_percent": 47,
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 200000
+    }
+  },
+  "additional_rate_limits": [
+    {
+      "limit_name": "Codename Alpha",
+      "metered_feature": "codex_alpha",
+      "rate_limit": {
+        "allowed": true,
+        "limit_reached": false,
+        "primary_window": {
+          "used_percent": 88,
+          "limit_window_seconds": 604800,
+          "reset_after_seconds": 300000
+        },
+        "secondary_window": {
+          "used_percent": 3,
+          "limit_window_seconds": 18000,
+          "reset_after_seconds": 600
+        }
+      }
+    }
+  ],
+  "credits": {
+    "balance": "0"
+  }
+}

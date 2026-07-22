@@ -1,0 +1,22 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "rate_limit": null,
+  "additional_rate_limits": [],
+  "credits": {
+    "balance": "0"
+  },
+  "video_rate_limit": {
+    "alpha": {
+      "used_percent": 10,
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 3600
+    },
+    "beta": {
+      "used_percent": 90,
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 3600
+    }
+  }
+}

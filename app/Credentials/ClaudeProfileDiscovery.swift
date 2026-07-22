@@ -22,6 +22,34 @@ protocol ProfileFileSystem {
     func isDirectory(atPath path: String) -> Bool
     func directoryEntries(atPath path: String) -> [String]
     func fileContents(atPath path: String) -> Data?
+
+    // Reading one file has THREE outcomes, not two: `fileContents` collapses "not there"
+    // and "there and unreadable" into `nil`, and §4.1 requires those stay distinguishable
+    // — a locked or corrupt credential rendered as a confident "you are signed out" sends
+    // the user to re-authenticate a session that was never broken.
+    //
+    // A REQUIREMENT, not merely an extension member with a default. A method that exists
+    // only in a protocol extension dispatches STATICALLY through an existential, so the
+    // real filesystem's override would never be called and the distinction would be
+    // inert — which is exactly what happened on the first attempt at this. The default
+    // below keeps every existing conformer compiling unchanged.
+    func readFile(atPath path: String) -> FileReadResult
+}
+
+// The outcome of ONE file read. Names the FAULT, never the payload.
+enum FileReadResult {
+    case contents(Data)
+    case missing
+    case unreadable(String)
+}
+
+extension ProfileFileSystem {
+    // Conformers that cannot tell absence from unreadability keep the old behaviour: a
+    // fake filesystem holding a dictionary of files genuinely has no third case.
+    func readFile(atPath path: String) -> FileReadResult {
+        guard let data = fileContents(atPath: path) else { return .missing }
+        return .contents(data)
+    }
 }
 
 // The outcome of ONE credential lookup. Three cases, not an optional: §4.1 now

@@ -1,0 +1,11 @@
+{
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "id_token": "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiYXV0aDB8MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwgImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6IHsiY2hhdGdwdF9hY2NvdW50X2lkIjogInVzZXItMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwgImNoYXRncHRfdXNlcl9pZCI6ICJ1c2VyLTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsICJ1c2VyX2lkIjogInVzZXItMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwgImNoYXRncHRfcGxhbl90eXBlIjogImJ1c2luZXNzIiwgImNoYXRncHRfc3Vic2NyaXB0aW9uX2xhc3RfY2hlY2tlZCI6ICIyMDI2LTA2LTAxVDAwOjAwOjAwWiJ9LCAiZW1haWwiOiAic29tZW9uZUBleGFtcGxlLmNvbSJ9.not-a-signature",
+    "access_token": "codex-fixture-access-token",
+    "refresh_token": "codex-fixture-refresh-token",
+    "account_id": "user-000000000000000000000000"
+  },
+  "last_refresh": "2026-07-21T22:07:30.993453Z",
+  "auth_mode": "chatgpt"
+}

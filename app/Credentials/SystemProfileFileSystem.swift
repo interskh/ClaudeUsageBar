@@ -35,6 +35,27 @@ struct SystemProfileFileSystem: ProfileFileSystem {
         (try? fileManager.contentsOfDirectory(atPath: path)) ?? []
     }
 
+    // The three-way read (§4.1's `failed`-vs-`signedOut` split, applied to files). The
+    // default implementation of this method cannot tell "not there" from "there and
+    // unreadable" because `fileContents` returns nil for both; this conformer can, and
+    // the distinction is the difference between telling a user they are signed out and
+    // telling them the app could not read their credential.
+    func readFile(atPath path: String) -> FileReadResult {
+        guard fileManager.fileExists(atPath: path) else { return .missing }
+        // Size is checked BEFORE reading, not after: reading then rejecting would have
+        // already done the damage the cap exists to prevent.
+        if let size = (try? fileManager.attributesOfItem(atPath: path)[.size]) as? NSNumber,
+           size.intValue > SystemProfileFileSystem.maximumIdentityFileBytes {
+            return .unreadable("the file is larger than this app will read")
+        }
+        guard let data = fileManager.contents(atPath: path) else {
+            // Exists, and could not be read: permissions, an unreadable volume, or a
+            // rewrite in flight. Names the fault, never the path's contents.
+            return .unreadable("the file exists but its contents could not be read")
+        }
+        return .contents(data)
+    }
+
     func fileContents(atPath path: String) -> Data? {
         // Size is checked BEFORE reading, not after: reading then rejecting would have
         // already done the damage the cap exists to prevent.

@@ -1,0 +1,15 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "rate_limit": {
+    "primary_window": {
+      "percent_used": 93,
+      "window_seconds": 18000
+    }
+  },
+  "additional_rate_limits": [],
+  "credits": {
+    "balance": "0"
+  }
+}

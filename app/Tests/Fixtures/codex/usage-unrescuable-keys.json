@@ -1,0 +1,12 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "rate_limit": {
+    "note": "none"
+  },
+  "additional_rate_limits": "unavailable",
+  "credits": {
+    "balance": "0"
+  }
+}

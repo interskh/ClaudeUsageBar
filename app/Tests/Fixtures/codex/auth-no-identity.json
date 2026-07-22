@@ -1,0 +1,9 @@
+{
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "access_token": "codex-fixture-access-token",
+    "refresh_token": "codex-fixture-refresh-token"
+  },
+  "last_refresh": "2026-07-21T22:07:30.993453Z",
+  "auth_mode": "chatgpt"
+}

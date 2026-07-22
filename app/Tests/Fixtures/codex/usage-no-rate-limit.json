@@ -1,0 +1,9 @@
+{
+  "user_id": "user-000000000000000000000000",
+  "account_id": "user-000000000000000000000000",
+  "plan_type": "pro",
+  "additional_rate_limits": [],
+  "credits": {
+    "balance": "0"
+  }
+}
