@@ -1,0 +1,10 @@
+{
+  "numStartups": 7,
+  "userID": "fixture-user-registered",
+  "oauthAccount": {
+    "accountUuid": "00000000-0000-4000-8000-00000000a005",
+    "emailAddress": "registered@example.test",
+    "organizationUuid": "00000000-0000-4000-8000-0000000000b5",
+    "displayName": "Fixture Registered"
+  }
+}

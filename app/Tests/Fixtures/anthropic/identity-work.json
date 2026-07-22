@@ -1,0 +1,11 @@
+{
+  "numStartups": 3,
+  "userID": "fixture-user-work",
+  "oauthAccount": {
+    "accountUuid": "00000000-0000-4000-8000-00000000a002",
+    "emailAddress": "work@example.test",
+    "organizationUuid": "00000000-0000-4000-8000-0000000000b2",
+    "organizationName": "Fixture Work Org",
+    "displayName": "Fixture Work"
+  }
+}

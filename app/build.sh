@@ -14,9 +14,12 @@ cd "$(dirname "$0")"
 # Source layout. Adding a .swift file to one of these directories is picked up by
 # both targets with no edit here.
 #   PURE_DIRS     — pure logic (parsing, discovery, classification, worst-of).
-#                   Compiled into BOTH the app and the test target, so these
-#                   directories must stay free of networking, Keychain and
-#                   SwiftUI (§10 of the design).
+#                   Compiled into the app target whole, and into the test target
+#                   MINUS APP_ONLY_FILES. §9's layout puts a few impure files in
+#                   these directories (the Keychain reader, the real filesystem);
+#                   everything the test target compiles must stay free of
+#                   networking, Keychain and SwiftUI (§10), which the purity
+#                   check below enforces rather than trusting.
 #   APP_ONLY_DIRS — SwiftUI/AppKit views, the account store, the @main entry
 #                   point. App target only; the test target must not link them.
 #   TEST_DIRS     — the test runner and its harness. Test target only.
@@ -24,18 +27,39 @@ PURE_DIRS=(Model Providers Credentials)
 APP_ONLY_DIRS=(App Core UI)
 TEST_DIRS=(Tests)
 
+# Individual files that §9's layout places inside a PURE dir but which are NOT pure:
+# the Keychain reader, and the concrete filesystem that reads the real home directory
+# and environment. Both are excluded by name from the test compile rather than moved,
+# so the source layout stays as §9 specifies and the exclusion is stated where the
+# target sets are rather than hidden in an import. Tests reach the same behaviour
+# through the pure ClaudeCredentialSource / ProfileFileSystem protocols with fakes, so
+# the test target can touch neither the real Keychain nor the developer's home even by
+# mistake. Paths are relative to app/.
+APP_ONLY_FILES=(Credentials/KeychainStore.swift Credentials/SystemProfileFileSystem.swift)
+
+# Dependencies that must never appear in the sources the TEST target compiles (§10).
+# The exclusion list above is hand-maintained and will rot as tasks 5-6 add files to
+# Credentials/ and Providers/; this check does not, so purity stays self-enforcing.
+IMPURE_PATTERNS='usr/bin/security|SecItem|import Security|URLSession|import SwiftUI|import AppKit|NSHomeDirectory|ProcessInfo|Process\('
+
 # Fills the FOUND array with absolute paths to the .swift files in the given
-# directories. Absolute (rather than relative) so that #filePath in the test
-# harness resolves without depending on the runtime working directory, and so
-# nothing word-splits on a path containing a space.
+# directories, minus anything listed in EXCLUDED (relative to app/). Absolute
+# (rather than relative) so that #filePath in the test harness resolves without
+# depending on the runtime working directory, and so nothing word-splits on a
+# path containing a space.
 FOUND=()
+EXCLUDED=()
 collect_swift() {
     FOUND=()
-    local dir file
+    local dir file skip excluded
     for dir in "$@"; do
         [ -d "$dir" ] || continue
         while IFS= read -r -d '' file; do
-            FOUND+=("$file")
+            skip=0
+            for excluded in ${EXCLUDED[@]+"${EXCLUDED[@]}"}; do
+                [ "$file" = "$PWD/$excluded" ] && skip=1
+            done
+            [ "$skip" -eq 1 ] || FOUND+=("$file")
         done < <(find "$PWD/$dir" -name '*.swift' -print0 | LC_ALL=C sort -z)
     done
 }
@@ -45,9 +69,25 @@ collect_swift() {
 if [ "${1:-}" = "--test" ]; then
     echo "Building test target..."
     mkdir -p build
+    # A typo in APP_ONLY_FILES would silently link the Keychain into the test
+    # target, which is precisely what the list exists to prevent. Fail loud.
+    for excluded in "${APP_ONLY_FILES[@]}"; do
+        if [ ! -f "$excluded" ]; then
+            echo "❌ APP_ONLY_FILES lists a file that does not exist: $excluded"
+            exit 1
+        fi
+    done
+    EXCLUDED=("${APP_ONLY_FILES[@]}")
     collect_swift "${PURE_DIRS[@]}" "${TEST_DIRS[@]}"
+    EXCLUDED=()
     if [ ${#FOUND[@]} -eq 0 ]; then
         echo "❌ No test sources found"
+        exit 1
+    fi
+    if IMPURE=$(grep -lE "$IMPURE_PATTERNS" "${FOUND[@]}"); then
+        echo "❌ Test target sources reference an impure dependency (§10):"
+        echo "$IMPURE" | sed 's|^|   |'
+        echo "   Move the file to an APP_ONLY dir, or add it to APP_ONLY_FILES."
         exit 1
     fi
     swiftc -o build/ClaudeUsageBarTests "${FOUND[@]}"

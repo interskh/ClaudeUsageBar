@@ -1,0 +1,9 @@
+{
+  "numStartups": 1,
+  "userID": "fixture-user-anonymous",
+  "oauthAccount": {
+    "displayName": "Fixture With No Identifier",
+    "hasExtraUsageEnabled": false,
+    "billingType": "stripe_subscription"
+  }
+}

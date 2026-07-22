@@ -106,7 +106,13 @@ and an unpinnable identity.
 Two constraints for implementation follow from the measurements:
 
 - Strategy B's output carries a **trailing newline** (1507 bytes vs the API's 1506).
-  It must be trimmed before parsing.
+  This does **not** break JSON decoding — `JSONSerialization` tolerates trailing ASCII
+  whitespace, measured. The trim matters for a different reason: §6 revives a stopped
+  account by detecting that its stored credential *changed*, which compares bytes, so
+  the two readers must produce an identical canonical form or every poll looks like a
+  change. Trimming also strips a trailing NUL, which `JSONSerialization` does reject.
+  A test asserting "trimming prevents a parse failure" guards nothing and will pass
+  against an implementation that never trims.
 - The spike observed a fully-populated `PATH`, but it was launched via `open` **from a
   shell**, which forwards the caller's environment. That reading is contaminated and
   does **not** show that a Finder- or login-item-launched app inherits a shell `PATH`.
@@ -211,15 +217,19 @@ enum AccountState {
     case pending
     case active(Snapshot)
     case stale(Snapshot, since: Date)  // last good data; fetches currently failing
-    case signedOut                     // no credential, or credential unusable
+    case signedOut                     // credential ABSENT — user-actionable, normal
     case expired(Date)                 // access token past its own expiry; use the CLI
+    // Could not determine the state: read failed, subprocess unlaunchable, payload
+    // unparseable. NOT the same as signedOut — see §4.1. Names the fault, never the
+    // payload, since the payload is the secret.
     case failed(String)
 }
 
 // Identity is opaque and provider-defined, but always derived from credential-side
-// material that is stable across sign-ins. One provider derives it from the
-// configuration location; the other from a composite of its ambiguous identifier
-// fields (§4). Consumers only ever compare it — they never parse it.
+// material that is stable across sign-ins — NEVER from the configuration location.
+// One provider derives it from the account identifier recorded alongside the profile;
+// the other from a composite of its ambiguous identifier fields (§4). Consumers only
+// ever compare it — they never parse it.
 struct AccountIdentity: Hashable { /* provider-defined, opaque to consumers */ }
 
 // Discovery yields an account TOGETHER with its resolved state. Returning bare
@@ -313,11 +323,67 @@ displayed as signed out.
   (`<dir>/.claude.json` containing an `oauthAccount` object). A directory without it is
   not an account and never appears in any state. This is what excludes
   `~/.claude-backups` and `~/.claude-koop-llm-stub`.
+
+  **The default directory is special-cased here too, for the same reason it is
+  special-cased in the credential namespace.** On the target machine
+  `~/.claude/.claude.json` exists but carries **no** `oauthAccount`, while the
+  home-level `~/.claude.json` carries it; every non-default profile carries it
+  in-directory. Applied literally, this gate therefore excludes the **primary
+  account entirely** — the app would show no default profile at all, failing
+  acceptance criterion 2. So for the default directory **only**, the home-level
+  `~/.claude.json` is a fallback identity source. No other profile may inherit it:
+  otherwise a signed-out sibling could borrow the default account's identity and
+  two directories would resolve to one account. The asymmetry is not incidental —
+  the default profile is the odd one out in *both* the credential namespace and the
+  identity file location, and an implementation that special-cases only the first
+  silently drops the user's main account.
+
+  **Precedence for the default directory: in-directory first, home-level second.**
+  `~/.claude/.claude.json` is a real, actively-written config that merely happens to
+  carry no `oauthAccount` today; if a future CLI version writes one there it becomes
+  authoritative, which is the correct outcome. Both orders have a failure mode, so the
+  choice is pinned by a case where *both* files carry an `oauthAccount`.
+
+  An `oauthAccount` object carrying no identifier field at all is excluded, since
+  §3 forbids deriving identity from the location and there would be nothing durable
+  left to key persisted state on.
+
+  **Two directories resolving to one account collapse to a single entry, and the
+  survivor is chosen by credential health — never by scan order.** Ranked
+  `pending` > `expired` > `failed` > `signedOut`, with scan order only as a tie-break.
+  First-scanned-wins looks harmless and is not: with two directories sharing an
+  account identifier and a live credential in only the second, the app never consults
+  the working credential's service and reports a healthy login as signed out — the
+  same failure the default-profile special case exists to prevent, reached by a
+  different route.
+
+  A consequence for §6: because a credential entry belongs to exactly one directory
+  (its service name is a digest of that path) and duplicates now collapse, **two
+  accounts can never resolve to one Anthropic credential**. The request budget must
+  therefore be keyed on the *service name*, which is correct regardless of this rule
+  and survives changing it.
 - **Credential gate — decides state, never inclusion.** An included account is resolved
-  to `pending`, `signedOut`, or `expired` by inspecting its credential alone. A usable
-  credential yields `pending` — authenticated, not yet fetched; a missing or unusable
+  to `pending`, `signedOut`, `expired`, or `failed` by inspecting its credential alone.
+  A usable credential yields `pending` — authenticated, not yet fetched; an **absent**
   one yields `signedOut`; a present but lapsed one yields `expired`. `work-ethan` is
   included and rendered `signedOut`.
+
+  **A failed read is `failed`, never `signedOut`.** These answer different questions:
+  `signedOut` means *the credential is not there*, which is a normal, user-actionable
+  display state; `failed` means *the app could not find out*, which is an operational
+  fault. Collapsing them makes a locked Keychain, a subprocess that could not be
+  launched, and a corrupt payload all render as a confident "you are signed out" —
+  advice that is wrong and that sends the user to re-authenticate a session that was
+  never broken. Distinguish at minimum: item absent (`signedOut`), read failed
+  (`failed`), and payload present but unparseable (`failed`, with the parse fault
+  named — never the payload itself).
+
+  This matters disproportionately because `signedOut` is otherwise the terminus of
+  several independent wrong turns — hash-first namespace resolution, the literal
+  identity gate, and a non-absolute configuration path each produce a *plausible*
+  signed-out verdict for a perfectly healthy account. Every one of those is silent.
+  Reserving `signedOut` for the one case that genuinely means it is what keeps the
+  state diagnostic.
 
 The credential gate tests **only what the app actually consumes**: presence of an access
 token and its recorded expiry. It must **not** require renewal material. Read-only
@@ -588,6 +654,18 @@ refresh and the periodic re-discovery above. Credential observation is cheap and
 so it continues on a slow cadence even for accounts whose polling has stopped; it costs
 no upstream requests, which is what makes it safe to keep running under a rate-limit
 budget.
+
+**Change detection compares a digest, never the credential itself.** The stored blob is
+*not* only the Anthropic OAuth token. Observed on the target machine, one profile's entry
+also carries an `mcpOAuth` section holding live third-party client IDs and client secrets
+for unrelated MCP servers. Retaining the blob to diff it across polls would therefore
+persist other services' credentials to disk, in a file this app has no business creating
+— a materially worse exposure than the one the read-only rule was written to prevent.
+So: hold a cryptographic digest of the canonical blob for comparison and discard the blob
+itself; and parse only the `claudeAiOauth` subtree, ignoring every sibling key rather than
+decoding the whole document into a retained structure. The same rule governs diagnostics
+— the credential blob must never be logged, attached to an error, written to a crash
+report, or included in the raw-response retention of §5, which covers API responses only.
 
 **Account discovery re-runs on a schedule, not only at launch.** Profiles are created,
 signed into, and signed out of while the app is running; a launch-only scan would leave

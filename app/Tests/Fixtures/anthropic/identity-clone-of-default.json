@@ -1,0 +1,11 @@
+{
+  "numStartups": 4,
+  "userID": "fixture-user-primary",
+  "oauthAccount": {
+    "accountUuid": "00000000-0000-4000-8000-00000000a001",
+    "emailAddress": "primary@example.test",
+    "organizationUuid": "00000000-0000-4000-8000-0000000000b1",
+    "organizationName": "Fixture Org",
+    "displayName": "Fixture Primary (copied configuration)"
+  }
+}
