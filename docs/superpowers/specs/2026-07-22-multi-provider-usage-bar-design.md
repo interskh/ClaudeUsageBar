@@ -67,7 +67,7 @@ forfeits that, so polling cadence and backoff must absorb rate limiting instead
 
 ---
 
-## 2. RISK: Keychain access from a signed GUI app — spike before building
+## 2. Keychain access from a signed GUI app — spike result
 
 **No `.credentials.json` exists on any profile on the target machine.** The macOS
 Keychain is the *only* Anthropic credential source; there is no file fallback.
@@ -77,28 +77,41 @@ Keychain ACLs are per-application. Items written by Claude Code may prompt
 different binary. Reads performed from an interactive shell during design prove
 nothing — `/usr/bin/security` was already trusted there.
 
-Two candidate strategies:
+Two candidate strategies were measured by a throwaway spike: a stub compiled
+`-parse-as-library`, packaged as a real `.app` with a hardened runtime, and launched
+twice through the GUI path so the ACL saw an identical binary on both runs.
 
 - **A — Direct API:** `SecItemCopyMatching` against `kSecClassGenericPassword`.
-  Cleaner, no subprocess, but most likely to trigger an ACL prompt.
-- **B — Subprocess:** `/usr/bin/security find-generic-password -s <service> -a $USER -w`.
-  If Claude Code wrote these items via the `security` CLI, the ACL names
-  `/usr/bin/security` and this path inherits access silently. This is the approach
-  onWatch uses in production.
+- **B — Subprocess:** `/usr/bin/security find-generic-password -s <service> -a $USER -w`,
+  the approach onWatch uses in production.
 
-**Task 1 is a throwaway spike** that builds a signed stub, runs it as a real `.app`,
-and records for each strategy: does it read, does it prompt, does "Always Allow"
-persist across relaunch. Outcomes:
+| Strategy | Run 1 | Run 2 | Outcome |
+|---|---|---|---|
+| A | 9796 ms / 5875 ms | 9614 ms / 2240 ms | Reads, but **prompts on every launch**; the grant does not survive relaunch |
+| B | 102 ms / 101 ms | 121 ms / 99 ms | **Silent on every item and every run** |
 
-| Result | Action |
-|---|---|
-| Silent read | Adopt that strategy. |
-| Prompts once, "Always Allow" persists | Acceptable. Onboarding must explain it, and **code-signing identity must stay stable** — an identity change invalidates the ACL and re-prompts. |
-| Prompts every launch / denied on both | **Stop and report.** The design as specified is not viable; do not proceed to Task 4+. |
+**Adopt Strategy B.** Its decisive property is that the process the ACL evaluates is
+Apple-signed `/usr/bin/security`, whose identity is invariant across our rebuilds —
+so the reader's own signature is irrelevant to whether a prompt appears.
 
-`build.sh` currently signs with `Developer ID Application: Linkko Technology Pte Ltd
-(Q467HQ5432)` and silently falls back to ad-hoc. That fallback must be made **loud**,
-because a silent switch to ad-hoc changes the signing identity and re-triggers prompts.
+That property is not a nicety here. The build machine has **no valid Developer ID
+identity**, so `build.sh` is already falling back to ad-hoc, and an ad-hoc signature's
+designated requirement is a `cdhash` pin over the exact binary. Any ACL grant is
+therefore invalidated by *any* rebuild — which is why Strategy A re-prompted with an
+unchanged binary and why "keep the signing identity stable" is not a remedy that is
+available. Making the signing fallback **loud** (§11) is consequently a correctness
+requirement, not hygiene: a silent drop to ad-hoc is the difference between a stable
+and an unpinnable identity.
+
+Two constraints for implementation follow from the measurements:
+
+- Strategy B's output carries a **trailing newline** (1507 bytes vs the API's 1506).
+  It must be trimmed before parsing.
+- The spike observed a fully-populated `PATH`, but it was launched via `open` **from a
+  shell**, which forwards the caller's environment. That reading is contaminated and
+  does **not** show that a Finder- or login-item-launched app inherits a shell `PATH`.
+  The §5.1 requirement to resolve the agent version without relying on inherited `PATH`
+  stands unweakened.
 
 ---
 
@@ -273,9 +286,12 @@ For each candidate, resolve the Keychain **service name**:
 
 - **Default dir (`~/.claude`): the unsuffixed `Claude Code-credentials` entry is
   authoritative.** This is mandatory, not an optimisation. On the target machine the
-  derived name `sha256("/Users/kyle/.claude")[0..8] = 6a445fbb` **exists but is empty**
-  (`expiresAt: 0`, no `refreshToken`, no `subscriptionType`); binding it would report
-  the primary account as signed out. The derived location is **not consulted at all**
+  derived name `sha256("/Users/kyle/.claude")[0..8] = 6a445fbb` **exists and holds
+  data, but no usable credential** — a 506-byte payload carrying no OAuth block at all
+  (no `expiresAt`, no `refreshToken`, no `subscriptionType`); binding it would report
+  the primary account as signed out. Note that the disqualifying condition is the
+  absence of usable OAuth material, **not** an absent or zero-length Keychain item:
+  gating on item existence or non-empty data would admit this entry. The derived location is **not consulted at all**
   for the default profile: the authoritative namespace is the only one, so when it is
   absent the account resolves to `signedOut`. Retaining a derived fallback would risk
   binding anomalous material — the empty entry on the target machine proves such
@@ -715,7 +731,7 @@ app/
   Providers/UsageProvider.swift             # protocol + FetchError
   Providers/AnthropicProvider.swift
   Providers/CodexProvider.swift
-  Credentials/KeychainStore.swift           # strategy chosen by the Task 1 spike
+  Credentials/KeychainStore.swift           # Strategy B subprocess read (§2)
   Credentials/ClaudeProfileDiscovery.swift  # dir scan, service-name resolution, gates
   Credentials/CodexAuthReader.swift
   Core/UsageStore.swift                     # accounts, per-account polling/backoff/cache
@@ -746,7 +762,7 @@ Each test encodes **why** the behaviour matters:
 | Test | Regression it prevents |
 |---|---|
 | Fixture has `seven_day_sonnet: null` while `limits[]` carries a live scoped entry; parser reports the scoped usage | Reverting to flat-key parsing, which stays `200 OK` and silently under-reports |
-| Default profile resolves to the unsuffixed item when a **present-but-empty** hashed item also exists | Reporting the primary account signed out (the real bug on the target machine) |
+| Default profile resolves to the unsuffixed item when a hashed item that is **present and non-empty but carries no OAuth block** also exists | Reporting the primary account signed out (the real bug on the target machine), and gating on item existence rather than credential usability |
 | `~/.claude-backups` and a dir with no `oauthAccount` are excluded | Non-accounts rendering as broken entries |
 | An account whose credential is missing/unusable is **present** in the result, in the signed-out state | Conflating the inclusion gate with the state gate, which makes signed-out unrepresentable |
 | A credential with a usable, unexpired access token but **no renewal material** resolves `pending`, and reaches `active` only after a successful fetch | Disqualifying an account over a capability the app never exercises; and collapsing authenticated-but-unfetched into active |
@@ -842,7 +858,7 @@ require a screenshot of the rendered popover and menu bar.
 
 ## 14. Implementation order
 
-1. **Spike:** Keychain read from a signed GUI app; decide strategy. *Blocking.*
+1. ~~**Spike:** Keychain read from a signed GUI app; decide strategy.~~ **Done — Strategy B (§2).**
 2. Split the single file into §9 layout with **no behaviour change**; update
    `build.sh` glob; scaffold the test target.
 3. `Model/` + `UsageProvider` protocol.
