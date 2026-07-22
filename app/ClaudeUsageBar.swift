@@ -1538,9 +1538,6 @@ struct UsageView: View {
         .padding()
         }
         .frame(width: 360)
-        // Darken the translucent popover material so contrast stays consistent
-        // no matter how light the content behind the popover is.
-        .background(Color(red: 0.07, green: 0.07, blue: 0.08).opacity(0.62))
         .onAppear {
             // Load saved cookie when view appears
             if let savedCookie = UserDefaults.standard.string(forKey: "claude_session_cookie") {
