@@ -21,9 +21,12 @@ This website can be deployed to GitHub Pages:
 4. Folder: `/website`
 5. Save
 
-Your site will be available at: `https://Artzainnn.github.io/claudeusagebar/`
+Pages is not set up for this fork. If you enable it on
+[interskh/ClaudeUsageBar](https://github.com/interskh/ClaudeUsageBar), the site would be
+served from `https://interskh.github.io/ClaudeUsageBar/`.
 
-**Note:** This project uses a custom domain: `claudeusagebar.com` configured via Vercel.
+**Note:** `claudeusagebar.com` is the original project's custom domain (via Vercel) and
+serves its site, not this one.
 
 ### Local Development
 
@@ -47,13 +50,12 @@ python3 -m http.server 8000
 - Responsive design
 - Dark theme
 - Inter font from Google Fonts
-- Stripe donation integration
 
 ## Features
 
-- Hero section with download CTA
+- Hero section with build-from-source CTA
 - Feature showcase
-- Installation guide
+- Build instructions
 - Screenshots section
 - FAQ
 - Footer with links

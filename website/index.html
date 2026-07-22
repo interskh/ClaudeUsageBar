@@ -8,28 +8,27 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="canonical" href="https://claudeusagebar.com/">
-  <title>ClaudeUsageBar – Free Claude Usage Tracker for macOS</title>
-  <meta name="description" content="Free, open-source macOS menu bar app that displays your Claude AI usage percentage. Get notifications before hitting your limit. Lightweight, private, and native.">
+  <!-- No canonical/og:url: this fork has no site of its own yet, and pointing them at
+       the original project's domain would tell crawlers to index that site instead.
+       Set both once this fork is actually hosted. -->
+  <title>ClaudeUsageBar – Free Claude &amp; Codex Usage Tracker for macOS</title>
+  <meta name="description" content="Free, open-source macOS menu bar app that displays your Claude and OpenAI Codex usage percentage, for every account you are signed in to. Get notifications before hitting your limit. Lightweight, private, and native.">
   <!-- Open Graph -->
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://claudeusagebar.com/">
-  <meta property="og:title" content="ClaudeUsageBar – Free Claude Usage Tracker for macOS">
-  <meta property="og:description" content="Free, open-source macOS menu bar app that displays your Claude AI usage percentage. Get notifications before hitting your limit. Lightweight, private, and native.">
-  <meta property="og:image" content="https://claudeusagebar.com/og-image.png">
+  <meta property="og:title" content="ClaudeUsageBar – Free Claude &amp; Codex Usage Tracker for macOS">
+  <meta property="og:description" content="Free, open-source macOS menu bar app that displays your Claude and OpenAI Codex usage percentage, for every account you are signed in to. Get notifications before hitting your limit. Lightweight, private, and native.">
+  <meta property="og:image" content="og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="ClaudeUsageBar - Track your Claude AI usage from the macOS menu bar">
+  <meta property="og:image:alt" content="ClaudeUsageBar - Track your Claude and Codex usage from the macOS menu bar">
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@maximemb_">
-  <meta name="twitter:creator" content="@maximemb_">
-  <meta name="twitter:title" content="ClaudeUsageBar – Free Claude Usage Tracker for macOS">
-  <meta name="twitter:description" content="Free, open-source macOS menu bar app that displays your Claude AI usage percentage. Get notifications before hitting your limit.">
-  <meta name="twitter:image" content="https://claudeusagebar.com/og-image.png">
+  <meta name="twitter:title" content="ClaudeUsageBar – Free Claude &amp; Codex Usage Tracker for macOS">
+  <meta name="twitter:description" content="Free, open-source macOS menu bar app that displays your Claude and OpenAI Codex usage percentage, for every account you are signed in to. Get notifications before hitting your limit.">
+  <meta name="twitter:image" content="og-image.png">
   <meta name="twitter:image:width" content="1200">
   <meta name="twitter:image:height" content="630">
-  <meta name="twitter:image:alt" content="ClaudeUsageBar - Track your Claude AI usage from the macOS menu bar">
+  <meta name="twitter:image:alt" content="ClaudeUsageBar - Track your Claude and Codex usage from the macOS menu bar">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -375,6 +374,13 @@
       gap: 6px;
     }
 
+    .download-note {
+      font-size: 14px;
+      color: var(--text-muted);
+      max-width: 520px;
+      text-align: center;
+    }
+
     /* Screenshot */
     .screenshot-section {
       position: relative;
@@ -479,6 +485,14 @@
 
     .usage-section {
       margin-bottom: 16px;
+    }
+
+    .usage-provider-heading {
+      margin-top: 20px;
+    }
+
+    .usage-account-detail {
+      margin: 12px 0 0 14px;
     }
 
     .usage-section:last-of-type {
@@ -628,6 +642,30 @@
       line-height: 1.6;
     }
 
+    .feature-card p a {
+      color: var(--claude-orange);
+      text-decoration: none;
+    }
+
+    .feature-card p a:hover {
+      text-decoration: underline;
+    }
+
+    .build-command {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 2;
+      color: var(--claude-orange);
+      margin-bottom: 16px;
+      word-break: break-all;
+    }
+
+    .build-inline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
     /* Footer */
     footer {
       position: relative;
@@ -649,6 +687,15 @@
     .footer-text {
       font-size: 14px;
       color: var(--text-muted);
+    }
+
+    .footer-text a {
+      color: var(--text-secondary);
+      text-decoration: none;
+    }
+
+    .footer-text a:hover {
+      color: var(--text-primary);
     }
 
     .footer-links {
@@ -724,105 +771,6 @@
       width: 20px;
       height: 20px;
       fill: currentColor;
-    }
-
-    .coffee-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--claude-orange);
-      text-decoration: none;
-      font-size: 15px;
-      font-weight: 500;
-      padding: 10px 20px;
-      background: rgba(218, 119, 86, 0.1);
-      border: 1px solid rgba(218, 119, 86, 0.2);
-      border-radius: 10px;
-      transition: all 0.3s;
-    }
-
-    .coffee-link:hover {
-      background: rgba(218, 119, 86, 0.15);
-      border-color: rgba(218, 119, 86, 0.3);
-      transform: translateY(-2px);
-    }
-
-    /* Other Products */
-    .other-products {
-      position: relative;
-      z-index: 1;
-      padding: 60px 24px 80px;
-    }
-
-    .other-products-header {
-      text-align: center;
-      margin-bottom: 36px;
-    }
-
-    .other-products-header h2 {
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-primary);
-    }
-
-    .products-grid {
-      display: flex;
-      justify-content: center;
-      gap: 20px;
-      max-width: 700px;
-      margin: 0 auto;
-      flex-wrap: wrap;
-    }
-
-    .product-card {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 20px 28px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      text-decoration: none;
-      transition: all 0.3s;
-      flex: 1 1 0;
-      min-width: 280px;
-      max-width: 340px;
-    }
-
-    .product-card:hover {
-      background: var(--bg-card-hover);
-      border-color: rgba(255, 255, 255, 0.1);
-      transform: translateY(-3px);
-    }
-
-    .product-icon {
-      width: 44px;
-      height: 44px;
-      flex-shrink: 0;
-    }
-
-    .product-icon svg {
-      width: 100%;
-      height: 100%;
-    }
-
-    .product-info {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .product-name {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .product-desc {
-      font-size: 13px;
-      color: var(--text-muted);
-      line-height: 1.4;
     }
 
     /* FAQ Section */
@@ -1000,18 +948,6 @@
       }
     }
   </style>
-  <script id="datafast-queue">
-    window.datafast = window.datafast || function() {
-      window.datafast.q = window.datafast.q || [];
-      window.datafast.q.push(arguments);
-    };
-  </script>
-  <script
-    defer
-    data-website-id="dfid_HMM2pp9guqaCpR3KioH9l"
-    data-domain="claudeusagebar.com"
-    src="https://datafa.st/js/script.js">
-  </script>
 </head>
 <body style="background-color: #0d0d0f;">
   <div class="ambient"></div>
@@ -1029,8 +965,8 @@
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#faq">FAQ</a>
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">GitHub</a>
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar/releases/latest/download/ClaudeUsageBar-Installer.dmg" class="nav-cta" data-fast-goal="download_macos">Download</a>
+        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">Original project</a>
+        <a href="#build" class="nav-cta">Build</a>
       </div>
       <button class="mobile-menu-toggle" onclick="document.getElementById('mobileMenu').classList.toggle('active')">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1044,13 +980,12 @@
   <div id="mobileMenu" class="mobile-menu">
     <a href="#features" onclick="document.getElementById('mobileMenu').classList.remove('active')">Features</a>
     <a href="#faq" onclick="document.getElementById('mobileMenu').classList.remove('active')">FAQ</a>
-    <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank" data-fast-goal="view_github">GitHub</a>
-    <a href="https://x.com/maximemb_?s=21&t=38Tp8cgg5LrrdHz7FGdtzQ" target="_blank" data-fast-goal="click_twitter">
+    <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">Original project</a>
+    <a href="https://x.com/maximemb_?s=21&t=38Tp8cgg5LrrdHz7FGdtzQ" target="_blank">
       <svg style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px; fill: currentColor;" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
       Twitter
     </a>
-    <a href="https://donate.stripe.com/3cIcN5b5H7Q8ay8bIDfIs02" target="_blank" data-fast-goal="buy_coffee">☕ Buy Dev a Coffee</a>
-    <a href="https://github.com/Artzainnn/ClaudeUsageBar/releases/latest/download/ClaudeUsageBar-Installer.dmg" class="mobile-cta" data-fast-goal="download_macos">Download for macOS</a>
+    <a href="#build" class="mobile-cta" onclick="document.getElementById('mobileMenu').classList.remove('active')">Build from source</a>
   </div>
 
   <section class="hero">
@@ -1070,23 +1005,22 @@
     </div>
 
     <h1>Track Your <span>Claude</span> Usage</h1>
-    <p class="hero-subtitle">A minimal macOS menu bar app that shows your Claude usage percentage at a glance. Never hit your limit unexpectedly again.</p>
+    <p class="hero-subtitle">A minimal macOS menu bar app that shows your Claude and Codex usage at a glance – every account you're signed in to. Sign in to Claude Code or the Codex CLI and it finds your credentials itself. Never hit your limit unexpectedly again.</p>
 
     <div class="hero-cta">
       <div class="hero-buttons">
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar/releases/latest/download/ClaudeUsageBar-Installer.dmg" class="download-btn" data-fast-goal="download_macos">
+        <a href="#build" class="download-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
           </svg>
-          Download for macOS
+          Build from source
         </a>
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank" class="github-btn" data-fast-goal="view_github">
+        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank" class="github-btn">
           <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
           </svg>
-          View on GitHub
+          Original project on GitHub
           <span class="github-stars" id="starCount">
             <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
             <span id="starNumber">--</span>
@@ -1117,9 +1051,7 @@
           Lightweight
         </span>
       </div>
-      <a href="https://www.producthunt.com/products/claudeusagebar?embed=true&amp;utm_source=badge-top-post-badge&amp;utm_medium=badge&amp;utm_campaign=badge-claudeusagebar" target="_blank" rel="noopener noreferrer" style="display: inline-block; margin-top: 24px;">
-        <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1067826&amp;theme=dark&amp;period=daily&amp;t=1769934818885" alt="ClaudeUsageBar - #1 Product of the Day on Product Hunt" width="250" height="54" />
-      </a>
+      <p class="download-note">Pre-built releases for this fork aren't published yet – building it takes about a minute.</p>
     </div>
   </section>
 
@@ -1144,31 +1076,76 @@
                   <path d="M8 1L9 6L13 3L10 7L15 8L10 9L13 13L9 10L8 15L7 10L3 13L6 9L1 8L6 7L3 3L7 6L8 1Z" fill="#da7756"/>
                 </svg>
               </span>
-              <span class="menu-item" style="color: var(--claude-orange);">67%</span>
+              <span class="menu-item" id="claudeMenuPercent" style="color: #f59e0b;">78%</span>
+              <span class="menu-icon">
+                <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 1L15 8L8 15L1 8Z" fill="#8f8f95"/>
+                </svg>
+              </span>
+              <span class="menu-item" id="codexMenuPercent" style="color: #22c55e;">31%</span>
             </div>
             <div class="usage-popup" id="usagePopup">
-              <div class="usage-popup-title">Claude Usage</div>
+              <div class="usage-popup-title">CLAUDE</div>
 
               <div class="usage-section">
                 <div class="usage-section-header">
-                  <span class="usage-section-label">Session (5 hour)</span>
-                  <span class="usage-section-reset" id="sessionReset">Resets at 3:45 PM</span>
+                  <span class="usage-section-label">▸ default</span>
+                  <span class="usage-section-percent" id="defaultPercent">62%</span>
                 </div>
                 <div class="usage-progress">
-                  <div class="usage-progress-bar green" id="sessionBar" style="width: 67%;"></div>
+                  <div class="usage-progress-bar green" id="defaultBar" style="width: 62%;"></div>
                 </div>
-                <span class="usage-section-percent" id="sessionPercent">67% used</span>
               </div>
 
               <div class="usage-section">
                 <div class="usage-section-header">
-                  <span class="usage-section-label">Weekly (7 day)</span>
-                  <span class="usage-section-reset" id="weeklyReset">Resets on 31 Jan 2026</span>
+                  <span class="usage-section-label">▾ work-fiona</span>
+                  <span class="usage-section-percent" id="fionaPercent">78%</span>
                 </div>
                 <div class="usage-progress">
-                  <div class="usage-progress-bar" id="weeklyBar" style="width: 82%;"></div>
+                  <div class="usage-progress-bar orange" id="fionaBar" style="width: 78%;"></div>
                 </div>
-                <span class="usage-section-percent" id="weeklyPercent">82% used</span>
+
+                <div class="usage-account-detail">
+                  <div class="usage-section-header">
+                    <span class="usage-section-label">Session (5 hour)</span>
+                    <span class="usage-section-reset" id="sessionReset">Resets at 11:04 PM</span>
+                  </div>
+                  <div class="usage-progress">
+                    <div class="usage-progress-bar green" id="sessionBar" style="width: 20%;"></div>
+                  </div>
+                  <span class="usage-section-percent" id="sessionPercent">20% used</span>
+                </div>
+
+                <div class="usage-account-detail">
+                  <div class="usage-section-header">
+                    <span class="usage-section-label">Weekly (7 day)</span>
+                    <span class="usage-section-reset" id="weeklyReset">Resets Fri 24 Jul</span>
+                  </div>
+                  <div class="usage-progress">
+                    <div class="usage-progress-bar orange" id="weeklyBar" style="width: 78%;"></div>
+                  </div>
+                  <span class="usage-section-percent" id="weeklyPercent">78% used</span>
+                </div>
+              </div>
+
+              <div class="usage-section">
+                <div class="usage-section-header">
+                  <span class="usage-section-label">▸ work-ethan</span>
+                  <span class="usage-section-reset">Signed out · sign in via Claude Code</span>
+                </div>
+              </div>
+
+              <div class="usage-popup-title usage-provider-heading">CODEX</div>
+
+              <div class="usage-section">
+                <div class="usage-section-header">
+                  <span class="usage-section-label">▸ pro</span>
+                  <span class="usage-section-percent" id="codexPercent">31%</span>
+                </div>
+                <div class="usage-progress">
+                  <div class="usage-progress-bar green" id="codexBar" style="width: 31%;"></div>
+                </div>
               </div>
 
               <div class="usage-popup-footer">
@@ -1195,6 +1172,40 @@
       <div class="feature-card">
         <div class="feature-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3>Every Account, Both Providers</h3>
+        <p>Tracks the Claude profiles in the usual locations at once – plus any you register by hand – and your OpenAI Codex account. One figure per provider in the menu bar, one card per account in the popup.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+          </svg>
+        </div>
+        <h3>Nothing to Set Up</h3>
+        <p>Sign in to Claude Code or the Codex CLI the way you already do. ClaudeUsageBar finds those credentials by itself – nothing to paste, no API key to enter.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <h3>Read-Only Credentials</h3>
+        <p>The app never writes, refreshes, or rotates a token – it only ever reads. Your CLI stays the sole owner of your sign-in, so nothing here can break it.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="7" height="7"/>
             <rect x="14" y="3" width="7" height="7"/>
             <rect x="14" y="14" width="7" height="7"/>
@@ -1213,7 +1224,7 @@
           </svg>
         </div>
         <h3>Smart Notifications</h3>
-        <p>Get notified when you're approaching your limit at 25%, 50%, 75%, and 90% usage thresholds.</p>
+        <p>Get notified when you're approaching your limit at 25%, 50%, 75%, and 90% usage thresholds. Every account alerts independently, and the alert names it.</p>
       </div>
 
       <div class="feature-card">
@@ -1234,7 +1245,7 @@
           </svg>
         </div>
         <h3>Privacy First</h3>
-        <p>No data collection. No analytics. Your usage data stays on your machine – always.</p>
+        <p>The app collects nothing, reports no analytics, and talks to no third-party service. Your access token goes only to Anthropic's and OpenAI's own usage endpoints, and their replies – including the latest raw response kept for diagnostics – stay on your machine.</p>
       </div>
 
       <div class="feature-card">
@@ -1262,6 +1273,26 @@
     </div>
   </section>
 
+  <section class="features" id="build">
+    <div class="features-header">
+      <h2>Build it yourself</h2>
+      <p>Pre-built releases for this fork aren't published yet</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>Three commands</h3>
+        <p class="build-command">git clone https://github.com/interskh/ClaudeUsageBar.git<br>cd ClaudeUsageBar/app<br>./build.sh</p>
+        <p>Needs macOS 12+ and the Xcode Command Line Tools. The universal binary lands in <span class="build-inline">app/build/ClaudeUsageBar.app</span> – drag it to Applications and launch it.</p>
+      </div>
+
+      <div class="feature-card">
+        <h3>About the original</h3>
+        <p>ClaudeUsageBar started as <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">Artzainnn/ClaudeUsageBar</a>, which is MIT-licensed and has its own installer downloads. That version is the original single-account app, which authenticates the old way – the setup described on this page belongs to this fork, so don't mix the two.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="faq" id="faq">
     <div class="faq-header">
       <h2>Frequently Asked Questions</h2>
@@ -1270,18 +1301,28 @@
 
     <div class="faq-grid">
       <div class="faq-item">
+        <div class="faq-question">How do I set it up?</div>
+        <div class="faq-answer">You don't. Sign in to <a href="https://claude.com/claude-code" target="_blank">Claude Code</a> and/or the <a href="https://developers.openai.com/codex/cli" target="_blank">Codex CLI</a> as you normally would, then launch ClaudeUsageBar. It finds the credentials those CLIs already store on your Mac and starts tracking straight away.</div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-question">How does ClaudeUsageBar get my usage data?</div>
-        <div class="faq-answer">ClaudeUsageBar uses your session cookie from claude.ai to fetch your usage data directly from Anthropic's API. Your cookie is stored locally on your machine and is never sent anywhere else.</div>
+        <div class="faq-answer">It reads the OAuth access token Claude Code or the Codex CLI has already stored on your Mac, and uses it to call each provider's own usage endpoint – the same figures you'd see in your account. Nothing is sent anywhere else.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Does it touch my sign-in?</div>
+        <div class="faq-answer">Never. The app is strictly read-only with credentials: it does not write, refresh, or rotate a token under any circumstances. Refresh tokens are single-use, so a second program refreshing yours would log your CLI out – which is exactly why this app stays out of that loop. If a credential expires, it simply shows the account as expired and asks you to sign in again with the CLI.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Can it track more than one account?</div>
+        <div class="faq-answer">Yes. Claude profiles in the usual locations – <span class="build-inline">~/.claude</span>, any <span class="build-inline">~/.claude-*</span>, and the directory your environment designates – are found automatically, alongside your Codex account; a profile kept anywhere else is added by registering its directory in Settings. Each account gets its own card and its own notifications, and you can turn any of them off.</div>
       </div>
 
       <div class="faq-item">
         <div class="faq-question">Is my data safe?</div>
-        <div class="faq-answer">Yes. Your session cookie and usage data never leave your computer. There's no analytics, no telemetry, and no data collection of any kind. ClaudeUsageBar is fully open source, so you can inspect every line of code.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-question">How do I get my session cookie?</div>
-        <div class="faq-answer">Go to <a href="https://claude.ai/settings/usage" target="_blank">claude.ai/settings/usage</a>, open Developer Tools (Cmd+Option+I), go to the Network tab, refresh the page, click the "usage" request, and copy the full "Cookie" value from the Request Headers.</div>
+        <div class="faq-answer">Yes. Your access token only ever goes to Anthropic's and OpenAI's own usage endpoints – there's no analytics, no telemetry, and no third-party service of any kind. What comes back stays on your Mac, including the latest raw response per account, which is kept for diagnostics and dropped when the account goes away. This page carries no analytics or tracking scripts either – it only loads a web font and, for the star count, the GitHub API. ClaudeUsageBar is fully open source, so you can inspect every line of code.</div>
       </div>
 
       <div class="faq-item">
@@ -1290,69 +1331,25 @@
       </div>
 
       <div class="faq-item">
-        <div class="faq-question">Does it work with Claude Free and Pro plans?</div>
-        <div class="faq-answer">Yes! ClaudeUsageBar works with both Free and Pro plans. Pro users will also see their weekly Sonnet usage if available.</div>
+        <div class="faq-question">Which plans does it work with?</div>
+        <div class="faq-answer">Any plan Claude Code or the Codex CLI can sign in to. Session and weekly limits are shown for each account, along with any model-scoped limits and pay-as-you-go spend your plan reports.</div>
       </div>
 
       <div class="faq-item">
-        <div class="faq-question">The app shows "Session cookie not set" – what do I do?</div>
-        <div class="faq-answer">Click on the menu bar icon, then click "Set Session Cookie" and paste your full cookie string from claude.ai. Make sure you're copying the entire cookie value, not just the sessionKey part.</div>
+        <div class="faq-question">The app shows no accounts – what do I do?</div>
+        <div class="faq-answer">Make sure Claude Code or the Codex CLI is signed in on this Mac. The app re-checks while it's running, so a fresh sign-in shows up without a restart. If your configuration directory lives somewhere unusual, add it under Settings.</div>
       </div>
-    </div>
-  </section>
-
-  <section class="other-products">
-    <div class="other-products-header">
-      <h2><svg style="width:24px;height:24px;vertical-align:-3px;margin-right:8px;" viewBox="0 0 24 24" fill="none" stroke="var(--claude-orange)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>Like ClaudeUsageBar? Check out my other products!</h2>
-    </div>
-    <div class="products-grid">
-      <a href="https://mediaboost.cc?utm_source=claudeusagebar&utm_medium=website&utm_campaign=cross_promo" target="_blank" class="product-card">
-        <div class="product-icon">
-          <svg width="44" height="44" viewBox="0 0 40 41" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect y="0.5" width="40" height="40" rx="20" fill="url(#mb_grad)"/>
-            <path d="M10.5366 12.0455H15.0877L19.8945 23.7727H20.0991L24.9059 12.0455H29.457V29.5H25.8775V18.1392H25.7326L21.2156 29.4148H18.7781L14.261 18.0966H14.1161V29.5H10.5366V12.0455Z" fill="white"/>
-            <defs>
-              <linearGradient id="mb_grad" x1="0" y1="20.5" x2="40" y2="20.5" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#37B6FF"/>
-                <stop offset="0.524" stop-color="#6282FE"/>
-                <stop offset="1" stop-color="#8A52FD"/>
-              </linearGradient>
-            </defs>
-          </svg>
-        </div>
-        <div class="product-info">
-          <span class="product-name">Mediaboost</span>
-          <span class="product-desc">Instantly boost AIO, SEO, Social Proof</span>
-        </div>
-      </a>
-      <a href="https://scalepages.co?utm_source=claudeusagebar&utm_medium=website&utm_campaign=cross_promo" target="_blank" class="product-card">
-        <div class="product-icon">
-          <svg width="44" height="44" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M21.0576 12.5854C21.0576 9.61202 24.6737 8.14655 26.7437 10.281L36.3772 20.2143C37.6334 21.5096 38.3359 23.2431 38.3359 25.0475V35.8892C38.3359 38.8626 34.7199 40.3281 32.6498 38.1936L23.0163 28.2603C21.7601 26.965 21.0576 25.2315 21.0576 23.4271V12.5854Z" fill="#D2B5FF"/>
-            <path d="M10.3496 12.1675C10.3496 9.19405 13.9657 7.72859 16.0357 9.86307L25.3877 19.5061C26.8245 20.9876 27.6279 22.9702 27.6279 25.0339V35.4712C27.6279 38.4446 24.0119 39.9101 21.9418 37.7756L12.3083 27.8423C11.0521 26.547 10.3496 24.8135 10.3496 23.0091V12.1675Z" fill="#8761E9"/>
-            <path d="M0 12.5854C0 9.61202 3.61605 8.14655 5.68611 10.281L15.3196 20.2143C16.5758 21.5096 17.2783 23.2431 17.2783 25.0475V35.8892C17.2783 38.8626 13.6623 40.3281 11.5922 38.1936L1.95872 28.2603C0.702526 26.965 0 25.2315 0 23.4271V12.5854Z" fill="#534AE5"/>
-          </svg>
-        </div>
-        <div class="product-info">
-          <span class="product-name">Scalepages</span>
-          <span class="product-desc">Scale inbound traffic with no-code programmatic SEO</span>
-        </div>
-      </a>
     </div>
   </section>
 
   <section class="creator">
     <div class="creator-content">
-      <span class="creator-label">Made with love by</span>
-      <a href="https://x.com/maximemb_?s=21&t=38Tp8cgg5LrrdHz7FGdtzQ" target="_blank" class="creator-link" data-fast-goal="click_twitter">
+      <span class="creator-label">Original app made with love by</span>
+      <a href="https://x.com/maximemb_?s=21&t=38Tp8cgg5LrrdHz7FGdtzQ" target="_blank" class="creator-link">
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
         </svg>
         Maxime B.
-      </a>
-      <a href="https://donate.stripe.com/3cIcN5b5H7Q8ay8bIDfIs02" target="_blank" class="coffee-link" data-fast-goal="buy_coffee">
-        <span>☕</span>
-        Buy Dev a Coffee
       </a>
     </div>
   </section>
@@ -1360,9 +1357,12 @@
   <footer>
     <div class="footer-content">
       <p class="footer-text">Built with care for the Claude community</p>
+      <p class="footer-text">A fork of <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">Artzainnn/ClaudeUsageBar</a> (MIT), adding OAuth authentication, multiple Claude profiles and Codex support.</p>
       <div class="footer-links">
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">GitHub</a>
-        <a href="https://github.com/Artzainnn/ClaudeUsageBar#-features" target="_blank">Privacy</a>
+        <a href="#build">Build</a>
+        <a href="#faq">Privacy</a>
+        <a href="https://github.com/interskh/ClaudeUsageBar" target="_blank">This fork</a>
+        <a href="https://github.com/Artzainnn/ClaudeUsageBar" target="_blank">Original project</a>
         <a href="https://github.com/Artzainnn/ClaudeUsageBar/blob/main/LICENSE" target="_blank">License</a>
       </div>
     </div>
@@ -1376,26 +1376,46 @@
       document.getElementById('lastUpdated').textContent = 'Last updated: ' + timeStr;
     }
 
+    // Colour bands: green < 70, amber < 90, red >= 90
+    function usageLevel(percent) {
+      return percent < 70 ? 'green' : percent < 90 ? 'orange' : 'red';
+    }
+
+    const levelColors = { green: '#22c55e', orange: '#f59e0b', red: '#ef4444' };
+
+    function setBar(barId, labelId, percent, labelSuffix) {
+      const bar = document.getElementById(barId);
+      bar.style.width = percent + '%';
+      bar.className = 'usage-progress-bar ' + usageLevel(percent);
+      document.getElementById(labelId).textContent = percent + '%' + (labelSuffix || '');
+    }
+
+    function setMenuFigure(id, percent) {
+      const el = document.getElementById(id);
+      el.textContent = percent + '%';
+      el.style.color = levelColors[usageLevel(percent)];
+    }
+
     // Generate random usage data
     function refreshUsage() {
       const sessionPercent = Math.floor(Math.random() * 85) + 5; // 5-90%
       const weeklyPercent = Math.floor(Math.random() * 85) + 10; // 10-95%
+      const defaultPercent = Math.floor(Math.random() * 85) + 5; // 5-90%
+      const codexPercent = Math.floor(Math.random() * 85) + 5; // 5-90%
 
-      // Update session
-      const sessionBar = document.getElementById('sessionBar');
-      sessionBar.style.width = sessionPercent + '%';
-      sessionBar.className = 'usage-progress-bar ' + (sessionPercent < 70 ? 'green' : sessionPercent < 90 ? 'orange' : 'red');
-      document.getElementById('sessionPercent').textContent = sessionPercent + '% used';
+      // work-fiona's expanded windows, and the worst of them on its own row
+      setBar('sessionBar', 'sessionPercent', sessionPercent, ' used');
+      setBar('weeklyBar', 'weeklyPercent', weeklyPercent, ' used');
+      const fionaPercent = Math.max(sessionPercent, weeklyPercent);
+      setBar('fionaBar', 'fionaPercent', fionaPercent);
 
-      // Update weekly
-      const weeklyBar = document.getElementById('weeklyBar');
-      weeklyBar.style.width = weeklyPercent + '%';
-      weeklyBar.className = 'usage-progress-bar ' + (weeklyPercent < 70 ? 'green' : weeklyPercent < 90 ? 'orange' : 'red');
-      document.getElementById('weeklyPercent').textContent = weeklyPercent + '% used';
+      // The other accounts' collapsed rows
+      setBar('defaultBar', 'defaultPercent', defaultPercent);
+      setBar('codexBar', 'codexPercent', codexPercent);
 
-      // Update menu bar percentage display
-      const menuPercent = document.querySelector('.menu-item[style]');
-      if (menuPercent) menuPercent.textContent = sessionPercent + '%';
+      // One menu bar figure per provider: worst Claude profile, and Codex
+      setMenuFigure('claudeMenuPercent', Math.max(fionaPercent, defaultPercent));
+      setMenuFigure('codexMenuPercent', codexPercent);
 
       // Update last updated time
       updateLastUpdatedTime();
@@ -1436,10 +1456,6 @@
     document.addEventListener('DOMContentLoaded', function() {
       updateLastUpdatedTime();
       fetchStarCount();
-
-      // Set initial weekly bar color
-      const weeklyBar = document.getElementById('weeklyBar');
-      weeklyBar.className = 'usage-progress-bar orange';
     });
   </script>
 </body>
