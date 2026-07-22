@@ -1,0 +1,8 @@
+{
+  "limits": [],
+  "spend": {
+    "used": { "amount_minor": 500, "currency": "USD", "exponent": 2 },
+    "limit": { "amount_minor": 2000, "currency": "USD", "exponent": 2 },
+    "balance": "0"
+  }
+}

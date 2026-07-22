@@ -1,0 +1,36 @@
+{
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 12,
+      "resets_at": "2026-07-22T21:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "monthly_all",
+      "group": "monthly",
+      "percent": 44,
+      "resets_at": "2026-08-01T00:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "daily_scoped",
+      "group": "daily",
+      "percent": 7,
+      "resets_at": "2026-07-23T00:00:00Z",
+      "scope": {
+        "surface": { "id": "batch-jobs", "display_name": "Batch jobs" }
+      },
+      "is_active": false
+    },
+    {
+      "kind": "quarterly_burst",
+      "percent": 3,
+      "resets_at": "2026-10-01T00:00:00Z",
+      "is_active": false
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "limits": [
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 5, "resets_at": "2026-07-23T07:00:00Z", "scope": { "surface": { "id": "shared-value" } }, "is_active": false },
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 6, "resets_at": "2026-07-23T07:00:00Z", "scope": { "workspace": { "id": "shared-value" } }, "is_active": false }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "limits": [
+    { "group": "weekly", "percent": 95, "resets_at": "2026-07-23T07:00:00Z", "scope": null, "is_active": false },
+    { "group": "session", "percent": 30, "resets_at": "2026-07-22T21:00:00Z", "scope": null, "is_active": false }
+  ]
+}

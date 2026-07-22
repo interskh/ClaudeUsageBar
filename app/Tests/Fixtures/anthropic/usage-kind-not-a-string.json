@@ -1,0 +1,6 @@
+{
+  "limits": [
+    { "kind": "weekly_all", "group": "weekly", "percent": 10, "resets_at": "2026-07-23T07:00:00Z", "scope": null, "is_active": false },
+    { "kind": 42, "group": "weekly", "percent": 95, "resets_at": "2026-07-23T07:00:00Z", "scope": null, "is_active": false }
+  ]
+}

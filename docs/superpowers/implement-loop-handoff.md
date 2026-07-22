@@ -206,3 +206,123 @@ scenario that cannot occur.
 .swift`, `Tests/ClaudeProfileDiscoveryTests.swift`, `Tests/Fixtures/anthropic/*`,
 `build.sh` (shared surface: `APP_ONLY_FILES`, `IMPURE_PATTERNS`, `collect_swift`'s
 `EXCLUDED`). `ResolvedClaudeProfile` is the surface tasks 5 and 7 consume.
+
+---
+
+## Task 5 — `AnthropicProvider`: OAuth fetch and `limits[]` parsing
+
+**The governing rule, learned the hard way: a parser can be exhaustive at INGESTION and
+lossy at PROJECTION.** Ingestion was correct from the first draft — no flat key is read
+anywhere, and mutating in an allow-list of known `kind`s fails five tests. Every bug found
+in two review rounds was downstream of it: an entry read successfully and then dropped,
+merged, or misscaled. That reproduces the exact silent under-report this task exists to
+kill, one layer lower, while every ingestion test stays green.
+
+The rule now stated in the file: **nothing below ingestion may delete a window it managed
+to read; the worst it may do is give it a degraded, distinct identity and say so.**
+
+**Decision: an entry that cannot be identified is kept with a fallback identity, never
+dropped.** The chain is resolved scope → `.feature(id: "group:<group>")` →
+`.feature(id: "index:<n>")`, each branch namespaced so it cannot alias a scope dimension
+or a `kind`. **Rejected: dropping the entry and warning**, which is what the first two
+drafts did — measured, an unscoped 10% window plus an unidentifiable 95% window reported
+`bindingUtilization = .known(10)`, an 85-point under-report with the true figure existing
+nowhere but a warning string. §5.1 mandates a discriminator fallback chain; it never
+sanctions deleting the window.
+
+**This bug was fixed twice.** Round 1 fixed it on the `scope` path and wrote the invariant
+into the file as a comment. The `kind` path nine lines away still returned `nil`, so the
+identical 85-point under-report survived through the adjacent field — caught by the
+verifier, not by review. **The transferable lesson: stating an invariant is not enforcing
+it.** A sweep of all twelve early-return sites followed, which turned up a second silent
+drop nobody had reported (a `spend` field present but not an object read as "no spending
+at all"). Neither reviewer nor the verifier found that one; only the systematic pass did.
+
+**Decision: position (`index:n`) is the last-resort identity, knowingly unstable.** Under
+vendor reordering the `WindowID` changes, which resets §8 threshold state and re-fires the
+whole [25,50,75,90] ladder. Accepted deliberately: under-reporting is the failure this
+provider exists to prevent, a re-fired ladder is noise rather than a wrong number.
+**Consequence for task 8 — this is the ONLY `WindowID` in the file that is not stable
+across polls.** Anything persisting per-window state keyed on `WindowID` must treat this
+case as intentionally volatile. Two `kind`-less entries sharing a `group` also still
+collide; both windows survive, `collidingIdentities` fires, and `bindingUtilization`
+iterates the full window list rather than a deduped map, so the worse figure is still
+reported — degraded history, never a lost figure.
+
+**Decision: a window's span comes from a duration, never a position.** An explicit numeric
+duration field wins if one appears; otherwise the leading token of `kind` maps to seconds
+through `WindowSpan(seconds:)`, the model's canonicalising factory, so this provider cannot
+spell a span differently from §5.2's numeric path. **Rejected: guessing a duration for an
+unrecognised class** (`monthly` → 30 days) — it merges an unknown class onto a canonical
+span; the length of a month is not the vendor's to have left unstated.
+
+**Decision: money keeps its scale even when partly qualified.** `{amount_minor: 1500,
+exponent: 2}` with no currency renders `15.00`, not `1500`. **The original draft emitted
+the minor-unit integer as a bare figure — a 100× over-report — and a test asserted that
+was correct.** The test is now inverted with a comment recording why the bug survived its
+own suite. `MonetaryAmount.unqualified(raw:)` means "the provider gave a bare figure";
+here it gave a scaled one. **Rejected: `NSNumber.intValue` anywhere** — it wraps silently
+(`99999999999999999999` → `7766279631452241919`, a fabricated figure presented as fact).
+One round-trip-checked `exactInteger` now serves minor units, exponents and durations.
+Negative amounts are **kept deliberately**: a refund or credit is legitimately negative.
+
+**Decision: utilization is clamped in the provider, not the model.** `Utilization.percent
+(_: Double)` guards only `isFinite` and then does `Int(value.rounded())`, which TRAPS —
+`percent: 1e30` killed the process (exit 133). Clamping provider-side keeps the model's
+contract honest; **rejected: widening the model's `Double` overload**, which would sanction
+handing it unrepresentable figures from every future provider.
+
+**Decision: `resets_at` is a three-case `Timestamp`** (`absent` / `parsed` / `unreadable`).
+A single optional conflated four facts, and a 0%-utilization window whose reset time merely
+failed to parse was dropped as "never started" with no warning. Only `.absent` may qualify
+a window as dormant. **Measured: `ISO8601DateFormatter` parses fractional OR whole seconds,
+never both** — the two option sets are disjoint, so both are tried; one formatter silently
+loses every reset time the day the vendor drops microseconds.
+
+**Decision: `FetchError` gained a terminal `.accountUnknown`.** "Account no longer present
+in local discovery" previously mapped to `.transport`, which §6 retries forever.
+**This modifies task 3's committed protocol file and is a deliberate source break** — any
+`switch` written against the old five cases will fail to compile, so the terminal case
+cannot be silently folded into the backoff path.
+
+**Agent version resolves from the installed CLI with no PATH dependence** — ~8 absolute
+candidate paths, `<path> --version`, 24h cache, compile-time floor on failure. Proven under
+`env -i` with no `PATH` and no `HOME` (macOS resolves home from the user record). An
+explicit minimal `Process.environment` is set so an npm-style `#!/usr/bin/env node`
+launcher resolves its interpreter deterministically rather than from an inherited PATH;
+on this machine the installed `claude` is a Mach-O binary with no shebang, so that path is
+hardening, not a live fix.
+
+### Carried forward — not fixable inside this task
+
+- **`spend.percent` is a REGRESSION, not an omission.** It is present and non-null in the
+  live payload and the shipped v1.3.2 app rendered its extra-usage bar from exactly that
+  figure. Task 4's `Spend` shape has no field for it. Needs a model change or a UI
+  derivation in tasks 10–11. Recorded so it is a decision rather than a silent loss.
+- **Two key sets are GUESSES, not observations**, and are labelled as such in the source:
+  the explicit-duration names (`limit_window_seconds` / `window_seconds` /
+  `duration_seconds` — that field is Codex's, §5.2) and the account-identity names
+  (`account_uuid` / `account_id` / `account.uuid` / `account.id`, none present in the live
+  payload). The identity-mismatch path required by §3 is therefore exercised only against
+  an invented fixture.
+- `AgentVersion.current(now:)` is synchronous on an actor and can block a cooperative-pool
+  thread up to 10s behind a hung CLI. Task 7 owns cadence.
+- **`build.sh --test` never compiles `FoundationHTTPClient.swift` or
+  `InstalledAgentVersionProbe.swift`.** The test gate alone cannot catch a break in the two
+  `APP_ONLY_FILES`; `swiftc -typecheck` over all six directories is the check that does.
+
+### Fixture provenance
+
+`Tests/Fixtures/anthropic/usage-live.json` is a **sanitised recording** of one real
+response. Altered: the model display name, one spend figure, and the disclaimer prose.
+**Unaltered and therefore load-bearing as observed API shape:** the key names, the
+null-vs-populated pattern (including the legacy flat keys being null while `limits[]`
+carries the same figures, which is the regression this task exists to prove), the nesting,
+the six-digit fractional timestamps, and the unusual codename keys. Every other
+`usage-*.json` is synthetic. Never quote any part of a credential blob into a fixture.
+
+**Touches:** new `Providers/{AnthropicProvider,HTTPRequesting,AgentVersion,
+FoundationHTTPClient,InstalledAgentVersionProbe}.swift`,
+`Tests/AnthropicProviderTests.swift`, `Tests/Fixtures/anthropic/usage-*.json` (24).
+Modified: `Providers/UsageProvider.swift` (+8, the shared protocol — see above),
+`Tests/main.swift`, `build.sh` (`APP_ONLY_FILES`). 259 checks.

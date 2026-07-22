@@ -1,0 +1,10 @@
+{
+  "limits": [
+    { "kind": "session", "group": "session", "label_hint": "stated", "limit_window_seconds": 604800, "percent": 50, "resets_at": "2026-07-23T07:00:00Z", "scope": { "model": { "id": "d1", "display_name": "Stated weekly" } }, "is_active": false },
+    { "kind": "session", "group": "session", "window_seconds": 604800, "percent": 51, "resets_at": "2026-07-23T07:00:00Z", "scope": { "model": { "id": "d2", "display_name": "Stated weekly two" } }, "is_active": false },
+    { "kind": "session", "group": "session", "duration_seconds": 604800, "percent": 52, "resets_at": "2026-07-23T07:00:00Z", "scope": { "model": { "id": "d3", "display_name": "Stated weekly three" } }, "is_active": false },
+    { "kind": "session", "group": "session", "window_seconds": 0, "percent": 53, "resets_at": "2026-07-22T21:00:00Z", "scope": { "model": { "id": "d4", "display_name": "Zero duration" } }, "is_active": false },
+    { "limit_window_seconds": 604800, "percent": 54, "resets_at": "2026-07-23T07:00:00Z", "scope": { "model": { "id": "d5", "display_name": "Kindless" } }, "is_active": false },
+    { "kind": "session", "group": "session", "percent": 55, "resets_at": "2026-07-22T21:00:00Z", "scope": { "model": { "id": "d6", "display_name": "Session" } }, "is_active": false }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "account_uuid": "00000000-0000-4000-8000-0000000000ff",
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 12,
+      "resets_at": "2026-07-22T21:00:00Z",
+      "scope": null,
+      "is_active": true
+    }
+  ]
+}

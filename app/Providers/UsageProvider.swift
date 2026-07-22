@@ -52,6 +52,14 @@ enum FetchError: Error, Equatable, Sendable {
 
     case transport(message: String)  // no response reached us
 
+    // The account this fetch was asked for is no longer present in local discovery — its
+    // configuration directory was removed or signed out between the poll being scheduled
+    // and it running. TERMINAL, and deliberately not `transport`: §6 backs off and retries
+    // a transport failure, so an account that has genuinely left would be retried forever
+    // on a timer nothing ever stops. The caller drops it instead; §6's periodic
+    // re-discovery is what brings it back if it returns.
+    case accountUnknown
+
     // A response arrived but could not be projected. It carries the body for the same
     // reason the success path does — this is precisely the schema drift §5's retention
     // exists to diagnose, so discarding the payload here would throw the evidence away

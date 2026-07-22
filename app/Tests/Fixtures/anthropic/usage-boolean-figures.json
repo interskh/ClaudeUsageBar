@@ -1,0 +1,6 @@
+{
+  "limits": [
+    { "kind": "session", "group": "session", "percent": true, "resets_at": "2026-07-22T21:00:00Z", "scope": null, "is_active": false }
+  ],
+  "spend": { "used": { "amount_minor": true, "currency": "USD", "exponent": 2 } }
+}

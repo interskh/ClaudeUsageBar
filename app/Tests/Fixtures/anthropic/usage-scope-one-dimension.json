@@ -1,0 +1,5 @@
+{
+  "limits": [
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 5, "resets_at": "2026-07-23T07:00:00Z", "scope": { "surface": { "id": "s1", "display_name": "Surface One" } }, "is_active": false }
+  ]
+}

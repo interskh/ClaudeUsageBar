@@ -1,0 +1,5 @@
+{
+  "limits": [
+    { "group": "weekly", "percent": 0, "resets_at": null, "scope": null, "is_active": false }
+  ]
+}

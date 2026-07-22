@@ -1,0 +1,15 @@
+{
+  "limits": [
+    "not-an-object",
+    { "group": "weekly", "percent": 50, "resets_at": "2026-07-23T07:00:00Z" },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 61,
+      "resets_at": "2026-07-23T07:00:00Z",
+      "scope": null,
+      "is_active": true
+    }
+  ],
+  "an_unannounced_new_top_level_field": { "anything": true }
+}

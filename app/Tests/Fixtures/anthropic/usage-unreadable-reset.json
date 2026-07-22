@@ -1,0 +1,33 @@
+{
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 0,
+      "resets_at": "2026-07-23 07:00:00",
+      "scope": {
+        "model": {
+          "id": "m1",
+          "display_name": "Aurora"
+        }
+      },
+      "is_active": false
+    },
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 0,
+      "resets_at": 1784800000,
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "daily_scoped",
+      "group": "daily",
+      "percent": 0,
+      "resets_at": "2026-07-23T07:00:00",
+      "scope": null,
+      "is_active": false
+    }
+  ]
+}

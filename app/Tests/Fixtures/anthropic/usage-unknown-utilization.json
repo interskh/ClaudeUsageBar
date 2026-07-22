@@ -1,0 +1,27 @@
+{
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": null,
+      "resets_at": "2026-07-22T21:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "resets_at": "2026-07-23T07:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 43,
+      "resets_at": "2026-07-23T07:00:00Z",
+      "scope": { "model": { "id": null, "display_name": "Aurora" } },
+      "is_active": false
+    }
+  ]
+}

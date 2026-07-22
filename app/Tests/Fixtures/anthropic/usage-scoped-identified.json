@@ -1,0 +1,25 @@
+{
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 22,
+      "resets_at": "2026-07-23T07:00:00Z",
+      "scope": {
+        "model": { "id": "mdl_a1b2c3", "display_name": "Meridian" },
+        "surface": null
+      },
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 5,
+      "resets_at": "2026-07-23T07:00:00Z",
+      "scope": {
+        "model": { "id": null, "display_name": null }
+      },
+      "is_active": false
+    }
+  ]
+}

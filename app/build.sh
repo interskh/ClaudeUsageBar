@@ -28,14 +28,20 @@ APP_ONLY_DIRS=(App Core UI)
 TEST_DIRS=(Tests)
 
 # Individual files that §9's layout places inside a PURE dir but which are NOT pure:
-# the Keychain reader, and the concrete filesystem that reads the real home directory
-# and environment. Both are excluded by name from the test compile rather than moved,
+# the Keychain reader, the concrete filesystem that reads the real home directory and
+# environment, the networking client, and the subprocess that probes the installed CLI
+# for its version. All are excluded by name from the test compile rather than moved,
 # so the source layout stays as §9 specifies and the exclusion is stated where the
 # target sets are rather than hidden in an import. Tests reach the same behaviour
 # through the pure ClaudeCredentialSource / ProfileFileSystem protocols with fakes, so
 # the test target can touch neither the real Keychain nor the developer's home even by
 # mistake. Paths are relative to app/.
-APP_ONLY_FILES=(Credentials/KeychainStore.swift Credentials/SystemProfileFileSystem.swift)
+APP_ONLY_FILES=(
+    Credentials/KeychainStore.swift
+    Credentials/SystemProfileFileSystem.swift
+    Providers/FoundationHTTPClient.swift
+    Providers/InstalledAgentVersionProbe.swift
+)
 
 # Dependencies that must never appear in the sources the TEST target compiles (§10).
 # The exclusion list above is hand-maintained and will rot as tasks 5-6 add files to
