@@ -14,5 +14,7 @@ CodexProviderTests.run()
 // rather than asserted. Top-level code is not actor-isolated in Swift 5 mode but does
 // run on the main thread, which is what the isolation actually requires.
 MainActor.assumeIsolated { UsageEngineTests.run() }
+// `NotificationEngine` is @MainActor for the same single-writer reason (§6, §8).
+MainActor.assumeIsolated { NotificationEngineTests.run() }
 
 TestHarness.finish()

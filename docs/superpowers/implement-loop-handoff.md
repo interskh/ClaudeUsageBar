@@ -622,3 +622,91 @@ call site), because `UsageStore` is `@MainActor`.
 Modified: `Tests/main.swift`, spec §6 (measured threshold + the single-account
 qualification), and the task 4 budget-key correction above. 800 checks.
 `build.sh` untouched: the engine is pure, the shell is already app-only `Core/`.
+
+---
+
+## Task 8 — the notifier: per-`(account, window)` thresholds
+
+**A correctness fix, not a feature — the spec says so, and it is the same silent-suppression
+family as the flat-key under-report.** The cookie-era notifier kept one global
+`lastNotifiedThreshold` compared against `max(session, weekly)`. With N accounts that slot
+is a race: account A crossing 75% overwrites it and *suppresses* account B's 75% alert,
+last poll wins, and the user is never told B is nearly exhausted. Nothing fails; the app
+just alerts less than it should. Fixed by keying state per `(provider, account, window)` —
+`AccountIdentity.storageKey` (durable identity, never label or location) as the outer
+namespace, the full `WindowID` (temporal span × scope) as the inner. Two accounts, a
+model-scoped short and long window, and a re-signed-in occupant at the same location are
+all now distinct slots.
+
+**Pure decision engine, impure delivery shell** — task 7's split repeated. `Model/
+NotificationEngine.swift` holds the `[25,50,75,90]` ladder, hysteresis, per-window state,
+reclamation, and the persisted shape; it is compiled into the test target and exhaustively
+tested with no side effects. `Core/AccountNotifier.swift` is the `NSUserNotification`
+delivery, the master toggle, and the `UserDefaults` blob. Both `@MainActor`, in task 7's
+single-writer domain. The engine returns *what alerts to deliver*; the shell delivers them,
+so a test asserts "these crossings → these alerts" without anything reaching the
+notification centre.
+
+**Decision: an alert carries its provider and derives its own title.** The delivery shell
+originally hardcoded the title `"Claude Usage Alert"` for *every* alert, so a Codex alert
+was branded as Claude — the task's own thesis (never assert a window the reading did not
+come from) violated one layer out, in the shell no test compiles. `NotificationAlert` now
+carries `provider` and computes `title` per-provider; the shell uses `alert.title` and
+*cannot* mislabel. This was the reviewer/codex split made concrete: the decision engine was
+clean and the violation lived in the impure layer the engine's discipline did not reach —
+the same shape as task 6's `readFile` and task 7's `contributingWindows`.
+
+**Decision: the full discovered set is an explicit `discovered roster` parameter, not an
+inferred one.** Reclamation must key on which accounts *exist*, not on which happened to
+produce a reading this cycle — otherwise a partial batch reads as deletions and re-fires
+the whole ladder when the omitted accounts return. `evaluate(_ readings:, discovered
+roster:)` reclaims on the roster; a reading absent from the roster **traps loudly**. This
+was true "by construction" while `publish` was the only caller, but task 9 adds
+`notifier.evaluate(store.accounts)`, so the property was one refactor from breaking
+silently. **Rejected: an asserted precondition** — an assertion cannot detect a partial
+call without an independent full-set reference, and the roster *is* that reference; making
+it a parameter makes the property safe rather than lucky.
+
+**Decision: reclamation keys on departure from discovery, not on a transient non-active
+state.** The `AccountState.windows` bridge returns the projected windows only for
+`active`/`stale`; a `.expired`/`.failed`/`.signedOut` account presents an empty window
+list. Reclaiming on that emptiness meant recovery to `.active` replayed 25/50/75/90 for
+*every* window — the avoidable twin of the re-fired-ladder noise the volatile-id trade
+accepted deliberately (there the id genuinely changed; here only the ability to read the
+window did, and task 7's auth-disambiguation makes `.expired` recoverable). Now such an
+account is roster-only and **holds** its slots exactly as a `.stale` over-horizon account
+does; only genuine absence from the roster reclaims. Composes with the roster parameter.
+
+**Decision: a restored threshold outside `[25,50,75,90]` is treated as re-armed, not
+trusted.** A valid-version blob carrying `99` would let no band `<= 99` count as a fresh
+crossing, so 90% would never fire, and it would then normalise to 90 — the crossing lost
+for good, silent suppression through the persistence door. `init(restoring:)` drops any
+stored threshold not in `storableBands` and re-arms to 0.
+
+**Volatile window identities (the crux carried from tasks 5–7).** `index:n` (Anthropic)
+and `dup:<ordinal>` (Codex) `WindowID`s are deliberately unstable across polls. A reorder
+reclaims the old slot and re-fires the ladder on the fresh id — the accepted trade. What is
+pinned: a *stable* sibling window across the same reorder does **not** re-fire, the old
+positional id is genuinely reclaimed (not merely superseded — tested against unbounded
+growth), and misattribution is structurally impossible because `storageKey` is the outer
+namespace. `.unknown` is neither a crossing nor a reset — every consumer `switch`es, no
+`?? 0`, and an `.unknown` window is *present* (its slot survives) while only an *absent*
+window is reclaimed.
+
+**Persistence** is one versioned blob (`PersistedNotificationState` v1) through task 7's
+`PersistedCodec`; undecodable or old-version → reclaimed, never resurrected. Deliberately
+*not* mirroring task 7's keyspace partitioning: the blob is tiny and rewritten wholesale,
+so there is no orphan-key class to sweep — the reviewer agreed.
+
+### What tasks 9–11 must wire
+
+- Task 9: call `notifier.evaluate(store.accounts)` after each `publish`. The `evaluate`
+  entry point takes `[AccountPresentation]` and splits readings from roster internally.
+- Task 11: repoint the master toggle and the test-notification button (`sendTestNotification`
+  is preserved for exactly this), then **delete `Core/Notifier.swift`** along with
+  `Core/LegacyUsageManager.swift` and the cookie call sites.
+
+**Touches:** new `Model/NotificationEngine.swift`, `Core/AccountNotifier.swift`,
+`Tests/NotificationEngineTests.swift`. Modified: `Tests/main.swift`. 863 checks.
+`build.sh` untouched: the engine is pure, the shell is app-only `Core/`. No task 1–7 file
+touched; the cookie `Notifier.swift` is left intact and compiling until task 11 removes it.
