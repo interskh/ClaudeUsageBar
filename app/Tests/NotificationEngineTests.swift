@@ -84,6 +84,7 @@ enum NotificationEngineTests {
         disabledAccountIsFrozen()
         discoveredButUnreadableAccountHoldsSlots()
         inputsSplitsReadableFromRoster()
+        evaluateOnPublishSeamFires()
         fullLadderFromZeroToNinety()
         persistRestoreRoundTrip()
         persistDeltaAndReclaimDirties()
@@ -466,6 +467,36 @@ enum NotificationEngineTests {
         TestHarness.check("inputs: expired is roster-only, not a reading",
                           inputs.discovered.contains(ref(.anthropic, "c").id)
                           && !inputs.readings.contains { $0.ref.id == ref(.anthropic, "c").id })
+    }
+
+    // The EXACT call task 9 wires: a fabricated `[AccountPresentation]` (what `store.$accounts`
+    // publishes) driven through `inputs(from:)` + `evaluate` — the seam `AppDelegate` observes.
+    // This pins that a threshold crossing on a real presentation set produces an alert, so the
+    // only thing between it and delivery is `AccountNotifier.isEnabled` (the `notifications_enabled`
+    // bridge, which the impure shell gates and the real launch verifies). Without this the app
+    // was silent on every crossing — a regression vs v1.3.2, not a deferral.
+    static func evaluateOnPublishSeamFires() {
+        let engine = NotificationEngine()
+        let acct = ref(.anthropic, "seam", label: "seam")
+        // An active account crossing 75% from a fresh (0) state — the shape `publish`
+        // produces once a real fetch lands.
+        let presentations = [
+            present(acct, .active(snap(acct, [window(.session, 75, label: "5h")]))),
+            present(ref(.codex, "quiet", label: "quiet"),
+                    .active(snap(ref(.codex, "quiet", label: "quiet"),
+                                 [window(.session, 6, label: "5h")]))),
+        ]
+        let inputs = NotificationEngine.inputs(from: presentations)
+        let alerts = engine.evaluate(inputs.readings, discovered: inputs.discovered)
+        TestHarness.check("seam: a crossing produces at least one alert", !alerts.isEmpty)
+        TestHarness.check("seam: the 75% band fired for the crossing account",
+                          bands(alerts, "seam").contains(75))
+        TestHarness.expect("seam: the quiet 6% account fires nothing",
+                           bands(alerts, "quiet"), [])
+        // The alert is titled from its own provider — a Codex crossing would not be branded
+        // "Claude". (Delivery is `AccountNotifier`'s; this is the decision it delivers.)
+        TestHarness.check("seam: alert names the source account",
+                          alerts.contains { $0.accountLabel == "seam" })
     }
 
     // The dirty-flag persist-delta: `drainPersistence` returns a payload only when state

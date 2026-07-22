@@ -161,18 +161,15 @@ class UsageManager: ObservableObject {
     }
 
     private func scheduleTimer(interval: TimeInterval) {
-        let schedule = { [weak self] in
-            self?.refreshTimer?.invalidate()
-            self?.refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-                self?.fetchUsage()
-            }
-            NSLog("⏱️ Next fetch in \(Int(interval))s")
-        }
-        if Thread.isMainThread {
-            schedule()
-        } else {
-            DispatchQueue.main.async(execute: schedule)
-        }
+        // NEUTERED (task 9): the multi-provider `UsageStore` is the app's single polling
+        // loop. This is the ONE chokepoint every recurring-timer path routes through
+        // (`startRefreshTimer`, and the `handleSuccess`/`handleFailure` reschedules), so a
+        // no-op here guarantees no legacy background loop can be established — even if a
+        // user clicks the old cookie popover's Refresh button, a single one-shot
+        // `fetchUsage` runs but nothing recurs. `interval` is intentionally ignored. Task
+        // 10 severs the cookie UI entirely; task 11 deletes this file.
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     private func currentBackoffInterval() -> TimeInterval {

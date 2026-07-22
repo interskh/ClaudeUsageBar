@@ -2,34 +2,13 @@ import AppKit
 
 extension UsageManager {
     func checkNotificationThresholds(percentage: Int) {
-        NSLog("🔔 Checking notifications: percentage=\(percentage)%, enabled=\(notificationsEnabled), lastNotified=\(lastNotifiedThreshold)%")
-
-        guard notificationsEnabled else {
-            NSLog("⚠️ Notifications disabled")
-            return
-        }
-
-        let thresholds = [25, 50, 75, 90]
-
-        for threshold in thresholds {
-            if percentage >= threshold && lastNotifiedThreshold < threshold {
-                NSLog("📬 Sending notification for \(threshold)% threshold")
-                sendNotification(percentage: percentage, threshold: threshold)
-                lastNotifiedThreshold = threshold
-                // Persist the threshold
-                UserDefaults.standard.set(lastNotifiedThreshold, forKey: "last_notified_threshold")
-                UserDefaults.standard.synchronize()
-            }
-        }
-
-        // Reset if usage drops below current threshold
-        if percentage < lastNotifiedThreshold {
-            let newThreshold = thresholds.filter { $0 <= percentage }.last ?? 0
-            NSLog("🔄 Resetting notification threshold from \(lastNotifiedThreshold)% to \(newThreshold)%")
-            lastNotifiedThreshold = newThreshold
-            UserDefaults.standard.set(lastNotifiedThreshold, forKey: "last_notified_threshold")
-            UserDefaults.standard.synchronize()
-        }
+        // NEUTERED (task 9): threshold notifications now come from the real `AccountNotifier`
+        // (per-account, per-window, from OAuth `limits[]`), which is the ONLY notification
+        // source in the new app. This legacy path fired from cookie-cache data — including a
+        // stale one-shot at launch via `loadCachedUsage → updateStatusBar` — which is the
+        // exact false "Claude Usage Alert" this rework exists to stop trusting, and would
+        // also double the real path. A no-op suppresses it. Task 11 deletes this file.
+        _ = percentage
     }
 
     func sendNotification(percentage: Int, threshold: Int) {

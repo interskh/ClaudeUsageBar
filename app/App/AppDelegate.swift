@@ -1,12 +1,37 @@
 import SwiftUI
 import AppKit
 import Carbon
+import Combine
 
-// Main entry point
+// Main entry point.
+//
+// `@MainActor` on the whole class (§6): `UsageStore` is `@MainActor`, and it is the
+// single owner of the app's one polling loop. AppKit already drives every delegate
+// callback and every `@objc` action here on the main thread, so annotating the class
+// makes what was already true checkable — the store's main-actor methods are called from
+// an isolated context rather than smuggled across a boundary. Three places hand control
+// back through a non-Swift-concurrency path and each reaches this @MainActor delegate via
+// `MainActor.assumeIsolated`, correct because all three are delivered on the main thread:
+// (1) the Carbon hotkey C callback (`togglePopover`); (2) the `store.$menuBar` Combine
+// sink (`renderMenuBar`); (3) the `store.$accounts` Combine sink (`notifier.evaluate`).
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
+    // The single polling owner (§6). Everything on screen is a projection it published.
+    var store: UsageStore!
+    // §8's delivery half. Driven off `store.$accounts` (the FULL roster, every publish) —
+    // NOT `$menuBar`, which is the coalesced worst-of subset. `evaluate` advances threshold
+    // state regardless of the master toggle and gates only DELIVERY on it, so the saved
+    // `notifications_enabled` preference is honoured from now (a v1.3.2 user who turned
+    // notifications off stays quiet). This is the only notification source in the new app.
+    var notifier: AccountNotifier!
+    // Kept only so the cookie-era popover/settings still compile until tasks 10–11 replace
+    // them. It is deliberately INERT: instantiated but never told to fetch or start a
+    // timer, so the app has exactly ONE polling loop — the store's.
     var usageManager: UsageManager!
+    var menuBarObserver: AnyCancellable?
+    var accountsObserver: AnyCancellable?
     var eventMonitor: Any?
     var hotKeyRef: EventHotKeyRef?
 
@@ -22,8 +47,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            // Create Claude logo as initial icon
-            updateStatusIcon(percentage: 0)
+            // Neutral idle glyph until the store publishes its first figures.
+            renderMenuBar([])
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.target = self
@@ -33,7 +58,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.isEnabled = true
         }
 
-        // Initialize usage manager
+        // The new multi-provider engine — the SINGLE polling owner. The menu bar is driven
+        // off its `@Published menuBar`, not a second timer.
+        store = UsageStore()
+        menuBarObserver = store.$menuBar
+            .receive(on: RunLoop.main)
+            .sink { [weak self] figures in
+                MainActor.assumeIsolated { self?.renderMenuBar(figures) }
+            }
+
+        // §8: the real threshold notifier, wired to the FULL roster the store republishes
+        // every cycle. Per-(account, window) crossings, honouring the saved master toggle.
+        notifier = AccountNotifier()
+        accountsObserver = store.$accounts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] accounts in
+                MainActor.assumeIsolated { self?.notifier.evaluate(accounts) }
+            }
+
+        store.start()
+
+        // Cookie-era manager: instantiated ONLY so `UsageView`/`Settings` still compile
+        // (tasks 10–11 remove them). It must NOT poll — do not call `fetchUsage()` or
+        // `startRefreshTimer()`. Its `init` only reads UserDefaults (no timer, no network,
+        // no Keychain), so leaving those two calls off makes it fully inert and guarantees
+        // the app has exactly one polling loop hitting the rate-limited endpoints.
         usageManager = UsageManager(statusItem: statusItem, delegate: self)
 
         // Create popover
@@ -41,10 +90,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 320, height: 450)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: UsageView(usageManager: usageManager))
-
-        // Fetch initial data and start adaptive refresh timer
-        usageManager.fetchUsage()
-        usageManager.startRefreshTimer()
 
         // Set up Cmd+U keyboard shortcut
         setupKeyboardShortcut()
@@ -118,9 +163,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Get the AppDelegate instance
             let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userData!).takeUnretainedValue()
 
-            // Toggle popover
+            // Toggle popover. The Carbon hotkey is a C callback, not a Swift-concurrency
+            // context, so it reaches the @MainActor delegate through `assumeIsolated` —
+            // valid because it is dispatched onto the main thread.
             DispatchQueue.main.async {
-                appDelegate.togglePopover()
+                MainActor.assumeIsolated { appDelegate.togglePopover() }
             }
 
             return noErr
@@ -186,6 +233,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openPopover() {
         if let button = statusItem.button {
+            // §6: re-run discovery on popover open (throttled inside the store). This is
+            // the store's local survey — it costs no upstream request.
+            store.popoverWillOpen()
             // Force UI refresh by updating percentages
             DispatchQueue.main.async {
                 self.usageManager.updatePercentages()

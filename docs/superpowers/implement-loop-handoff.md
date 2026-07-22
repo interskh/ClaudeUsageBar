@@ -710,3 +710,85 @@ so there is no orphan-key class to sweep — the reviewer agreed.
 `Tests/NotificationEngineTests.swift`. Modified: `Tests/main.swift`. 863 checks.
 `build.sh` untouched: the engine is pure, the shell is app-only `Core/`. No task 1–7 file
 touched; the cookie `Notifier.swift` is left intact and compiling until task 11 removes it.
+
+---
+
+## Task 9 — the menu bar, and the first cutover of the real engine onto screen
+
+The first task that puts the new `UsageStore` on screen with real credentials, replacing
+the cookie `UsageManager` as the app's polling owner. It is a UI cutover, not pure logic —
+`build.sh --test` compiles none of `App/`/`Core/`/`UI/`, so the gate is a **rendered
+screenshot with a quality verdict** plus `swiftc -typecheck` over all six directories.
+
+**The screenshot is the artifact, and it passed on quality, not just on rendering:** Claude
+spark **amber** at 72% (70–89 band) beside Codex diamond **green** at 6% (<70) — two
+providers in two different bands at once, which the old single-`max`-coloured icon
+structurally could not show. That simultaneity is the point of §7.1's per-provider design.
+
+**The critical constraint was exactly one polling loop.** The app previously started the
+cookie manager's timer; `UsageStore` also polls, and task 7's request budget is per-engine,
+so a second loop blows the measured 5-req/300s budget and throttles the user (who noticed a
+stray second bar once this session). Resolution: `AppDelegate` starts `UsageStore` as the
+sole poller, and the legacy manager is made **inert** — its `init` reads UserDefaults only,
+and the two `nonisolated` shims are empty so even the `loadCachedUsage → updateStatusBar →
+delegate.updateStatusIcon` path cannot fight the store for the status button. Verified at
+runtime: only the store logged fetches.
+
+**Decision: the worst-of stays single-sourced in the engine; the view only renders.** A
+pure `MenuBarPresentation` (`Model/`, testable) maps `store.menuBar: [ProviderFigure]` to
+band colour, glyph, value and tooltip in engine order — no re-derivation, no aggregation, no
+`?? 0`. `.unknown` renders as "?" in its own band, an absent provider is omitted (never
+"0%"), an empty `menuBar` is a neutral idle state. These paths could not be induced live
+(both real accounts returned known figures), so they rest on the pure tests — pinned and
+mutation-verified, band boundaries checked at 69/70/89/90.
+
+**Decision: `AppDelegate` is class-level `@MainActor`, with `assumeIsolated` at three
+hand-back sites.** The Carbon hotkey C callback (wrapped in `DispatchQueue.main.async`
+first), the `$menuBar` Combine sink and the `$accounts` sink (both `.receive(on:
+RunLoop.main)` first) — each provably on the main thread before `assumeIsolated`, none an
+off-main path like a `URLSession` completion.
+
+**The fix round caught a deferral that was a feature deletion.** The first pass left
+`AccountNotifier` wired nowhere, on the reasoning that the `$menuBar` sink is the wrong place
+(true — it is a coalesced worst-of subset, and task 8's roster parameter would trap on the
+partial call). But that justified changing the sink, not skipping the wiring: task 8 built
+`evaluate([AccountPresentation])` to take the **full roster** precisely so it hangs off
+`store.$accounts`, which `publish` reassigns complete every cycle. Left unwired, the new app
+was silent on every threshold crossing — except a stale one-shot at launch from the cookie
+cache, i.e. the *only* alert it fired was the exact false "Claude Usage Alert" the rework
+exists to kill. Now `notifier.evaluate(store.accounts)` is driven off the `$accounts` sink
+in `AppDelegate` (not from inside `store.publish`, so task 7's single-writer core stays
+untouched).
+
+**Decision: the saved notification preference is honoured from now, not from task 11.**
+`AccountNotifier` keys its master toggle on the same `notifications_enabled` UserDefaults key
+the legacy manager used, so a v1.3.2 user who disabled notifications stays quiet — wiring it
+default-on would have silently re-enabled them. Verified on this machine's real saved value
+(`0`): threshold state still advances (`notify.v1.state` written) while delivery count is 0.
+The contract is "advance regardless, gate only delivery"; task 11 repoints the settings
+*control*, but the *state* lives in UserDefaults and is respected now.
+
+**Two legacy paths neutered to hold the single-loop guarantee:** `scheduleTimer` is a no-op
+(the one chokepoint every recurring-timer path routes through, so a click on the still-present
+cookie Refresh button does one one-shot fetch and nothing recurs), and the legacy
+`checkNotificationThresholds` is a no-op (so no stale cookie-cache alert fires at launch).
+Both are documented no-ops with no unreachable-code warnings.
+
+### What tasks 10–11 must wire
+
+- Task 10 (popover cards): the popover still hosts the legacy `UsageView` on inert (zeroed)
+  data, and `PopoverView.swift:217,263` still call `usageManager.fetchUsage()` from the old
+  cookie Refresh buttons — sever those two call sites when the cards replace the view.
+- Task 11 (settings): repoint the notification master toggle control to `AccountNotifier`'s
+  `notifications_enabled` (the state is already honoured), then delete
+  `Core/LegacyUsageManager.swift`, `Core/Notifier.swift`, the cookie UI and the coffee button
+  with their last call sites.
+
+**Touches:** new `Model/MenuBarPresentation.swift`, `Tests/MenuBarPresentationTests.swift`.
+Modified: `App/AppDelegate.swift` (`@MainActor`, store ownership, `$menuBar`+`$accounts`
+sinks, notifier), `UI/MenuBarController.swift` (per-provider render, diamond glyph, inert
+shims), `Core/LegacyUsageManager.swift` (`scheduleTimer` inert), `Core/Notifier.swift`
+(`checkNotificationThresholds` inert), `Tests/NotificationEngineTests.swift` (the
+evaluate-on-publish seam test), `Tests/main.swift`. 891 checks. The real path launch → real
+Keychain → real HTTPS → menu bar is now REAL and screenshot-verified; only the popover body
+and settings remain on the old surface.
