@@ -4,9 +4,9 @@ import AppKit
 // §7.2's popover: one collapsed row per discovered account, grouped under provider
 // headers, each row expandable to its per-window bars, reset lines and the Extra dollar
 // line. The data source is `UsageStore` ALONE for the cards — every figure is an engine
-// projection under one consistent view (§7.1/§7.2), never re-derived here. The legacy
-// cookie manager survives only as the settings backing (notifications toggle, Open-at-
-// Login, ⌘U); task 11 repoints those and deletes it. Nothing in this file computes a
+// projection under one consistent view (§7.1/§7.2), never re-derived here. Settings are
+// backed by `AppSettings` and `AccountNotifier`; the legacy cookie manager no longer
+// exists. Nothing in this file computes a
 // utilization: the row figure is `Snapshot.bindingUtilization`, the single-sourced
 // function the menu bar also uses, so the popover and the menu bar cannot disagree.
 struct UsageView: View {

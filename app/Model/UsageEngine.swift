@@ -341,10 +341,6 @@ final class UsageEngine {
     // or a duplicate-identity resolution picking the other directory (§4.1 ranks by
     // credential health, so the winner can flip between surveys). Carry the ledger over:
     // issuing a fresh allowance here is a hole in the budget that opens every 8 hours.
-    // The credential the account is addressed by has changed identity — a token rotation,
-    // or a duplicate-identity resolution picking the other directory (§4.1 ranks by
-    // credential health, so the winner can flip between surveys). Carry the ledger over:
-    // issuing a fresh allowance here is a hole in the budget that opens every 8 hours.
     //
     // The OLD ledger is deliberately left in place. It may still be referenced by another
     // account that has not migrated — two accounts sharing a credential do not necessarily
