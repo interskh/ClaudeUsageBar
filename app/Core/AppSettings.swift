@@ -24,6 +24,26 @@ final class AppSettings: ObservableObject {
     static let shortcutEnabledKey = "shortcut_enabled"
     static let openAtLoginKey = "open_at_login"
 
+    // §11: the one-time cookie-era key purge. Impure half of `DefaultsMigration` — reads
+    // the present keys, applies the pure decision, and sets the marker. MUST run at launch
+    // BEFORE `UsageStore` starts, so a key scheduled for deletion cannot be read back by
+    // the store first. Idempotent: gated on the stored marker (second launch is a no-op)
+    // and it only removes keys that are both dead and present (a fresh install writes just
+    // the marker).
+    static func runDefaultsMigrationIfNeeded(defaults: UserDefaults = .standard) {
+        let present = Set(defaults.dictionaryRepresentation().keys)
+        let alreadyMigrated = defaults.bool(forKey: DefaultsMigration.markerKey)
+        let toPurge = DefaultsMigration.keysToPurge(present: present,
+                                                    alreadyMigrated: alreadyMigrated)
+        for key in toPurge {
+            defaults.removeObject(forKey: key)
+        }
+        if !alreadyMigrated {
+            defaults.set(true, forKey: DefaultsMigration.markerKey)
+            NSLog("🧹 2.0.0 migration: purged %d dead cookie-era key(s)", toPurge.count)
+        }
+    }
+
     private let defaults: UserDefaults
 
     // Reflects the real login-item registration, refreshed after every change.

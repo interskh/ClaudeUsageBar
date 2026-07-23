@@ -1004,3 +1004,47 @@ Task 12 purges those keys, bumps to 2.0.0, and adds the loud signing fallback.
 `Core/AccountNotifier.swift` (comment), `Credentials/ClaudeProfileDiscovery.swift`
 (`validateCandidate`), `Tests/ClaudeProfileDiscoveryTests.swift`. 924 checks. The app now runs
 entirely on the new engine; no legacy or inert leg remains.
+
+---
+
+## Task 12 — migration, version bump, loud signing (§11)
+
+The final implementation stage; deliberately small (Rule 2/3).
+
+**Decision: the dead-vs-live purge decision is a pure function derived from the actually-
+deleted source, not a guessed list.** `DefaultsMigration.keysToPurge(present:alreadyMigrated:)`
+intersects an explicit dead-key allowlist with the present keys — no prefix wildcard, no
+`removePersistentDomain`, nothing that could sweep a `usage.v2.account.<hash>` snapshot or a
+`credential:<digest>` ledger. The dead list (`claude_session_cookie`, `has_cached_usage`,
+the five `cached_*` single-account keys, `cached_last_fetch_attempt`, `last_notified_threshold`,
+`has_set_notifications`) was read out of `git show ef8867b^` of the deleted `LegacyUsageManager`
+and `Settings.swift` — the brief’s illustrative `cached_session_percentage` does NOT exist in
+the source and was correctly not used. A wrongly-purged LIVE key would be silent data loss on
+every upgrade; the reviewer verified exhaustively that the two sets are disjoint and no live
+key shares the `cached_` prefix.
+
+**Decision: migration runs in `applicationDidFinishLaunching` BEFORE the store is created,**
+gated on a `migrated_2_0_0` marker so it fires once and is idempotent — a key scheduled for
+deletion cannot be read back first, and a fresh install (no dead keys) is a harmless no-op that
+still sets the marker. No value migration: the old global `last_notified_threshold` is dropped,
+not carried into `notify.v1.state` (§8 hysteresis re-arms).
+
+**A tautological test, caught and fixed — the run’s recurring Rule-9 pattern once more.** The
+first-run-purge test derived its expectation from `Set(DefaultsMigration.deadKeys)`, so removing
+a key from the implementation shrank both sides equally and the assertion stayed green (only
+1 of 10 keys was actually pinned; mutation-proved). Fixed with an independent hardcoded oracle
+of all 10 key strings plus a `deadKeys matches the external oracle` check; the same mutation now
+fails 2 checks. A test that mirrors the implementation cannot fail when the implementation drifts.
+
+**Version + loud signing.** `Info.plist` bumped to `2.0.0` / build `8`. `build.sh`’s ad-hoc
+fallback is now unmissable (a boxed banner) and the success line reads "AD-HOC signed — NOT
+distributable" on that path while staying clean on the Developer-ID path — a correctness
+requirement per task 1, since this machine has no Developer ID and an ad-hoc build cannot be
+notarized or distributed. Signing LOGIC unchanged; `--test` still exits before the sign/launch
+block.
+
+**New shared surface:** the `migrated_2_0_0` marker key — a sibling task must not reuse it.
+
+**Touches:** new `Model/DefaultsMigration.swift`, `Tests/DefaultsMigrationTests.swift`.
+Modified `Core/AppSettings.swift` (applier + marker), `App/AppDelegate.swift` (call site, pre-store),
+`Info.plist` (version), `build.sh` (loud fallback), `Tests/main.swift`. 932 checks.

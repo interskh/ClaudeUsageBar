@@ -169,16 +169,34 @@ chmod 755 "$APP_PATH/Contents/MacOS/ClaudeUsageBar"
 # Clean extended attributes before signing
 xattr -cr "$APP_PATH" || true
 
-# Sign with Developer ID certificate
+# Sign with Developer ID certificate. An ad-hoc signature CANNOT be notarized or
+# distributed, so the fallback must be UNMISSABLE (§2, §11): shipping an ad-hoc build
+# unknowingly is the exact failure this loudness prevents. This machine has no Developer
+# ID identity, so the fallback path is the one that actually runs here.
 DEVELOPER_ID="Developer ID Application: Linkko Technology Pte Ltd (Q467HQ5432)"
+ADHOC_SIGNED=0
 if codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH" 2>/dev/null; then
     echo "✅ App signed with Developer ID"
 else
-    echo "⚠️  Falling back to ad-hoc signature"
+    ADHOC_SIGNED=1
     codesign --force --deep --sign - "$APP_PATH"
+    echo ""
+    echo "############################################################"
+    echo "##  ⚠️  AD-HOC SIGNED — NOT DISTRIBUTABLE  ⚠️              ##"
+    echo "##                                                        ##"
+    echo "##  No Developer ID identity was found, so the app was    ##"
+    echo "##  ad-hoc signed. It CANNOT be notarized or distributed  ##"
+    echo "##  and will be Gatekeeper-blocked on other Macs.         ##"
+    echo "##  Use only for local testing.                           ##"
+    echo "############################################################"
+    echo ""
 fi
 
-echo "Build successful!"
+if [ "$ADHOC_SIGNED" -eq 1 ]; then
+    echo "Build successful (AD-HOC signed — NOT distributable)."
+else
+    echo "Build successful!"
+fi
 echo "App bundle created at: $APP_PATH"
 echo "Launching app..."
 open "$APP_PATH"

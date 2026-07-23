@@ -40,6 +40,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // system light/dark setting (light mode had poor contrast).
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        // §11: purge the dead cookie-era UserDefaults keys ONCE, before the store starts,
+        // so a key scheduled for deletion can never be read back by the engine first.
+        AppSettings.runDefaultsMigrationIfNeeded()
+
         // NSUserNotification (deprecated but works without permissions for unsigned apps)
         NSLog("✅ App launched, notifications ready")
 

@@ -7,6 +7,7 @@ TestHarness.check(
 )
 
 UsageModelTests.run()
+DefaultsMigrationTests.run()
 MenuBarPresentationTests.run()
 ClaudeProfileDiscoveryTests.run()
 AnthropicProviderTests.run()
