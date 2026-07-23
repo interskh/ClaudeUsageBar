@@ -32,7 +32,7 @@ struct UsageView: View {
                                 .foregroundColor(.secondary)
                                 .tracking(0.5)
                             ForEach(group.accounts, id: \.ref.id) { account in
-                                AccountCard(account: account, store: store)
+                                AccountCard(account: account)
                             }
                         }
                     }
@@ -60,9 +60,12 @@ struct UsageView: View {
     // Accounts arrive already sorted by provider then label (engine `sortedKeys`), so a
     // provider header is emitted only when a provider actually has accounts — a provider
     // with none is simply never encountered, satisfying §7.2's "omit empty sections".
+    // A DISABLED account leaves the popover entirely (it stays in Settings so it can be
+    // re-enabled) — the engine already drops it from the menu bar; the cards must match,
+    // or unchecking a profile appears to do nothing here.
     private var providerGroups: [(provider: ProviderKind, accounts: [AccountPresentation])] {
         var groups: [(provider: ProviderKind, accounts: [AccountPresentation])] = []
-        for account in store.accounts {
+        for account in store.accounts where account.isEnabled {
             if var last = groups.last, last.provider == account.ref.provider {
                 last.accounts.append(account)
                 groups[groups.count - 1] = last
@@ -111,40 +114,23 @@ struct UsageView: View {
 // degraded cadence. `.unknown` renders as "—", never 0% and never another window's number.
 private struct AccountCard: View {
     let account: AccountPresentation
-    let store: UsageStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
-            if account.isExpanded, let snapshot = account.state.readableSnapshot {
+            // Cards are shown unfolded: a readable account always renders its full window
+            // list. Non-readable states (pending / signed-out / failed) carry their whole
+            // rendering in the header trailing and have no windows to show.
+            if let snapshot = account.state.readableSnapshot {
                 expandedBody(snapshot)
                     .padding(.leading, 16)
                     .padding(.top, 2)
-            } else if let note = account.degradationNote {
-                // §6/§7.2: a stretched cadence must be visible on the account's OWN card —
-                // and a rate-limited account is .active/.stale, so its default COLLAPSED
-                // row would otherwise show a plain bar and read as fresh. When expanded,
-                // `expandedBody` already carries the note; this is the collapsed twin.
-                Text(note)
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-                    .padding(.leading, 16)
             }
         }
     }
 
     private var header: some View {
         HStack(spacing: 6) {
-            if isExpandable {
-                Image(systemName: account.isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 10)
-            } else {
-                // Keep the label column aligned with expandable rows.
-                Color.clear.frame(width: 10, height: 1)
-            }
-
             Text(account.ref.label)
                 .font(.subheadline)
                 .lineLimit(1)
@@ -153,14 +139,11 @@ private struct AccountCard: View {
 
             trailing
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard isExpandable else { return }
-            store.setExpanded(!account.isExpanded, for: account.ref.id)
-        }
     }
 
-    // The right-hand summary for the collapsed row, one rendering per state category.
+    // The right-hand summary in the header, one rendering per state category. A readable
+    // account shows NOTHING here — its per-window bars are always listed below, so a
+    // summary bar would just duplicate the binding window.
     @ViewBuilder private var trailing: some View {
         switch account.state {
         case .pending:
@@ -179,14 +162,10 @@ private struct AccountCard: View {
                 .font(.caption)
                 .foregroundColor(.orange)
                 .lineLimit(1)
-        case .active(let snapshot), .stale(let snapshot, _):
-            UsageBar(utilization: Snapshot.bindingUtilization(of: snapshot.windows) ?? .unknown)
-                .frame(width: 120)
+        case .active, .stale:
+            EmptyView()
         }
     }
-
-    // Only an account with a readable snapshot (active/stale) has windows to expand into.
-    private var isExpandable: Bool { account.state.readableSnapshot != nil }
 
     @ViewBuilder private func expandedBody(_ snapshot: Snapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -212,8 +191,10 @@ private struct AccountCard: View {
                     }
                     if let resets = window.resetsAt {
                         Text("resets \(Self.resetString(resets, span: window.id.span))")
-                            .font(.caption2)
+                            .font(.system(size: 9))
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -231,8 +212,9 @@ private struct AccountCard: View {
     }
 
     // Session-class windows reset within a day, so a wall-clock time is what the user
-    // needs; longer windows reset days out, so weekday + date. The window's SPAN decides
-    // the format, never a hardcoded per-window string.
+    // needs; longer windows reset days out, so the full weekday + date AND the time — the
+    // whole reset moment, not just the day. The window's SPAN decides the format, never a
+    // hardcoded per-window string.
     private static func resetString(_ date: Date, span: WindowSpan) -> String {
         let f = DateFormatter()
         switch span {
@@ -240,7 +222,7 @@ private struct AccountCard: View {
             f.timeStyle = .short
             f.dateStyle = .none
         case .weekly, .other:
-            f.dateFormat = "EEE d MMM"
+            f.dateFormat = "EEE d MMM, h:mm a"
         }
         return f.string(from: date)
     }
