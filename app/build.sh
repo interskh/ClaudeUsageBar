@@ -169,14 +169,24 @@ chmod 755 "$APP_PATH/Contents/MacOS/ClaudeUsageBar"
 # Clean extended attributes before signing
 xattr -cr "$APP_PATH" || true
 
-# Sign with Developer ID certificate. An ad-hoc signature CANNOT be notarized or
-# distributed, so the fallback must be UNMISSABLE (§2, §11): shipping an ad-hoc build
-# unknowingly is the exact failure this loudness prevents. This machine has no Developer
-# ID identity, so the fallback path is the one that actually runs here.
+# Signing, in preference order:
+#   1. Developer ID — distributable + notarizable.
+#   2. A stable self-signed local identity (see setup-signing.sh) — NOT
+#      distributable, but its designated requirement names the cert's hash rather
+#      than this build's cdhash, so TCC grants (the Accessibility permission behind
+#      ⌘U) survive rebuilds instead of being re-prompted every time.
+#   3. Ad-hoc — churns the cdhash every rebuild; permissions re-prompt. UNMISSABLE
+#      fallback (§2, §11): shipping an ad-hoc build unknowingly is the exact failure
+#      this loudness prevents.
 DEVELOPER_ID="Developer ID Application: Linkko Technology Pte Ltd (Q467HQ5432)"
+LOCAL_SIGNING_ID="${CLAUDEUSAGEBAR_SIGNING_ID:-ClaudeUsageBar Dev}"
 ADHOC_SIGNED=0
 if codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH" 2>/dev/null; then
     echo "✅ App signed with Developer ID"
+elif security find-certificate -c "$LOCAL_SIGNING_ID" >/dev/null 2>&1 \
+     && codesign --force --deep --sign "$LOCAL_SIGNING_ID" "$APP_PATH" 2>/dev/null; then
+    echo "✅ App signed with stable local identity '$LOCAL_SIGNING_ID'"
+    echo "   (not distributable, but permissions persist across rebuilds)"
 else
     ADHOC_SIGNED=1
     codesign --force --deep --sign - "$APP_PATH"
@@ -188,6 +198,9 @@ else
     echo "##  ad-hoc signed. It CANNOT be notarized or distributed  ##"
     echo "##  and will be Gatekeeper-blocked on other Macs.         ##"
     echo "##  Use only for local testing.                           ##"
+    echo "##                                                        ##"
+    echo "##  Tip: run  bash setup-signing.sh  once for a stable    ##"
+    echo "##  local identity so permissions stop re-prompting.      ##"
     echo "############################################################"
     echo ""
 fi

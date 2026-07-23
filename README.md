@@ -106,6 +106,12 @@ chmod +x build.sh
 ./build.sh
 ```
 
+**Optional — stable local signing (one time):** with no Developer ID, `build.sh`
+ad-hoc signs, which changes the app's identity on every rebuild and makes macOS
+re-ask for the Accessibility permission behind the ⌘U shortcut each time. Run
+`bash setup-signing.sh` once to create a self-signed local identity; rebuilds then
+reuse it and the permission sticks. (Local dev only — still not distributable.)
+
 **Create DMG installer:**
 ```bash
 ./create_dmg.sh
