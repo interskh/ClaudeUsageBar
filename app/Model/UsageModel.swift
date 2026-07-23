@@ -11,6 +11,16 @@ import Foundation
 enum ProviderKind: String, Hashable, Sendable {
     case anthropic
     case codex
+
+    // The CLI that writes THIS provider's credential, for the "Sign in via …" recovery
+    // hint on a signed-out/expired card. Derived from the provider so a lapsed Codex
+    // account is directed to the Codex CLI, never misdirected to Claude Code.
+    var cliName: String {
+        switch self {
+        case .anthropic: return "Claude Code"
+        case .codex: return "Codex"
+        }
+    }
 }
 
 // Identity is resolved BEFORE any request, from credential-side material only, so
@@ -177,6 +187,63 @@ struct Spend: Equatable, Sendable {
         self.used = used
         self.limit = limit
         self.balance = balance
+    }
+}
+
+extension MonetaryAmount {
+    // The §7.2 "Extra $0.00 · $15 free" line renders a MonetaryAmount as text, and the
+    // rule from §5.2 that survives to here is: a qualified amount keeps its scale and
+    // currency; an unqualified one is shown EXACTLY as the provider stated it, with no
+    // symbol and no inferred scale implying a precision that was never present. The
+    // formatting is integer-only — no `Double` divide — because §5's handoff records a
+    // 100× over-report and a fabricated-figure bug that both entered through a Double,
+    // and a scaled minor-unit integer is exactly the input that trips them.
+    var display: String {
+        switch self {
+        case .unqualified(let raw):
+            return raw
+        case .qualified(let minor, let currency, let exponent):
+            let magnitude = MonetaryAmount.scaledString(minor: minor, exponent: exponent)
+            if currency == "USD" {
+                return minor < 0 ? "-$" + magnitude : "$" + magnitude
+            }
+            return "\(currency) " + (minor < 0 ? "-" + magnitude : magnitude)
+        }
+    }
+
+    // No real currency scales by more than a handful of digits; a value past this is a
+    // drifted or hostile provider/persisted figure, not a scale.
+    private static let maxExponent = 30
+
+    // minor units placed against a base-10 point `exponent` digits from the right. Both
+    // `minor` and `exponent` arrive from the provider payload AND from disk, so neither is
+    // trusted to be sane: this must DEGRADE on an adversarial value, never trap.
+    //   - magnitude (not `abs`) because `abs(Int.min)` overflows Int and traps.
+    //   - a negative exponent (a figure already coarser than its unit) and an exponent
+    //     beyond any real currency scale both fall back to the bare figure, rather than
+    //     overflow on `exponent + 1` (at Int.max) or force a pathological
+    //     `String(repeating:)` allocation (a huge-but-finite exponent).
+    private static func scaledString(minor: Int, exponent: Int) -> String {
+        let digits = String(minor.magnitude)
+        guard exponent > 0, exponent <= maxExponent else { return digits }
+        let padded = String(repeating: "0", count: max(0, exponent + 1 - digits.count)) + digits
+        let splitIndex = padded.index(padded.endIndex, offsetBy: -exponent)
+        return "\(padded[..<splitIndex]).\(padded[splitIndex...])"
+    }
+}
+
+extension Spend {
+    // The one text line §7.2 shows for extra usage: spend used, then the remaining
+    // credit balance qualified as "free". `nil` when there is nothing to say — an
+    // account with neither is not rendered as "$0.00", which would assert a spend the
+    // provider never reported. `spend.percent` (a v1.3.2 regression the handoff carried
+    // since task 5) is deliberately NOT surfaced: §7.2 replaced the percentage bar with
+    // this dollar line, so the missing field is resolved by the redesign, not restored.
+    var extraLine: String? {
+        var parts: [String] = []
+        if let used { parts.append(used.display) }
+        if let balance { parts.append(balance.display + " free") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

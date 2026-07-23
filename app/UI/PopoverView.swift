@@ -1,303 +1,89 @@
 import SwiftUI
 import AppKit
 
+// §7.2's popover: one collapsed row per discovered account, grouped under provider
+// headers, each row expandable to its per-window bars, reset lines and the Extra dollar
+// line. The data source is `UsageStore` ALONE for the cards — every figure is an engine
+// projection under one consistent view (§7.1/§7.2), never re-derived here. The legacy
+// cookie manager survives only as the settings backing (notifications toggle, Open-at-
+// Login, ⌘U); task 11 repoints those and deletes it. Nothing in this file computes a
+// utilization: the row figure is `Snapshot.bindingUtilization`, the single-sourced
+// function the menu bar also uses, so the popover and the menu bar cannot disagree.
 struct UsageView: View {
+    @ObservedObject var store: UsageStore
     @ObservedObject var usageManager: UsageManager
-    @State private var sessionCookieInput: String = ""
-    @State private var showingCookieInput: Bool = false
     @State private var showingSettings: Bool = false
 
     var body: some View {
         ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Claude Usage")
-                .font(.headline)
-                .padding(.bottom, 4)
-
-            if let error = usageManager.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .padding(.bottom, 8)
-            }
-
-            // Only show usage if data has been fetched
-            if !usageManager.hasFetchedData {
-                Text("👋 Welcome! Set your session cookie below to get started.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-            }
-
-            // Session Usage
-            if usageManager.hasFetchedData {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Session (5 hour)")
+            VStack(alignment: .leading, spacing: 14) {
+                if store.accounts.isEmpty {
+                    Text("No accounts discovered.\nSign in via Claude Code or Codex.")
                         .font(.subheadline)
-                    Spacer()
-                    if let resetTime = usageManager.sessionResetsAt {
-                        Text("Resets \(formatResetTime(resetTime))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                ProgressView(value: usageManager.sessionPercentage)
-                    .tint(colorForPercentage(usageManager.sessionPercentage))
-
-                Text("\(Int(usageManager.sessionPercentage * 100))% used")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // Weekly Usage
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Weekly (7 day)")
-                        .font(.subheadline)
-                    Spacer()
-                    if let resetTime = usageManager.weeklyResetsAt {
-                        Text("Resets \(formatResetTime(resetTime, includeDate: true))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                ProgressView(value: usageManager.weeklyPercentage)
-                    .tint(colorForPercentage(usageManager.weeklyPercentage))
-
-                Text("\(Int(usageManager.weeklyPercentage * 100))% used")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // Weekly Sonnet Usage (only show if available)
-            if usageManager.hasWeeklySonnet && usageManager.hasFetchedData {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Weekly Sonnet (7 day)")
-                            .font(.subheadline)
-                        Spacer()
-                        if let resetTime = usageManager.weeklySonnetResetsAt {
-                            Text("Resets \(formatResetTime(resetTime, includeDate: true))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-
-                    ProgressView(value: usageManager.weeklySonnetPercentage)
-                        .tint(colorForPercentage(usageManager.weeklySonnetPercentage))
-
-                    Text("\(Int(usageManager.weeklySonnetPercentage * 100))% used")
-                        .font(.caption)
                         .foregroundColor(.secondary)
-                }
-            }
-
-            // Weekly Fable Usage — only surfaced once usage is above 1%
-            // (new model, counted separately; hidden while idle to avoid clutter).
-            if usageManager.hasWeeklyFable && usageManager.hasFetchedData && usageManager.weeklyFableUsage >= 1 {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Weekly Fable (7 day)")
-                            .font(.subheadline)
-                        Spacer()
-                        if let resetTime = usageManager.weeklyFableResetsAt {
-                            Text("Resets \(formatResetTime(resetTime, includeDate: true))")
-                                .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(providerGroups, id: \.provider) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(providerName(group.provider))
+                                .font(.caption.weight(.bold))
                                 .foregroundColor(.secondary)
-                        }
-                    }
-
-                    ProgressView(value: usageManager.weeklyFablePercentage)
-                        .tint(colorForPercentage(usageManager.weeklyFablePercentage))
-
-                    Text("\(Int(usageManager.weeklyFablePercentage * 100))% used")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Usage credits (pay-as-you-go). Only shown once credits are actually
-            // used; links out to manage credits on claude.ai.
-            if usageManager.hasCreditUsage || usageManager.freeCreditsMinor > 0 {
-                let spentMinor = usageManager.extraSpentMinor
-                let limitMinor = usageManager.extraLimitMinor
-                let pct = limitMinor > 0 ? Double(spentMinor) / Double(limitMinor) : 0
-                let pctInt = Int((pct * 100).rounded())
-                // Show the exact % up to the limit; once over, just say "over limit".
-                let pctLabel = pctInt > 100 ? "over limit" : "\(pctInt)%"
-                let fmt: (Int) -> String = { minor in
-                    let v = Double(minor) / 100.0
-                    return usageManager.creditCurrency == "USD"
-                        ? String(format: "$%.2f", v)
-                        : String(format: "%@ %.2f", usageManager.creditCurrency, v)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Extra usage")
-                            .font(.subheadline)
-                        Spacer()
-                        Button(action: {
-                            if let url = URL(string: "https://claude.ai/new#settings/usage") {
-                                NSWorkspace.shared.open(url)
+                                .tracking(0.5)
+                            ForEach(group.accounts, id: \.ref.id) { account in
+                                AccountCard(account: account, store: store)
                             }
-                        }) {
-                            Text("Manage →")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.accentColor)
                         }
+                    }
+                }
+
+                Divider()
+
+                HStack {
+                    Text(store.lastSuccessAt.map { "Updated \(Self.timeString($0))" } ?? "Not yet updated")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Refresh") { store.refresh() }
                         .buttonStyle(.borderless)
-                    }
-
-                    // Reset date, shortened (e.g. "Resets Aug 1") so it fits inline.
-                    let shortReset: String? = usageManager.extraResetsAt.map { d in
-                        let f = DateFormatter(); f.dateFormat = "MMM d"
-                        return "Resets \(f.string(from: d))"
-                    }
-
-                    // Spend vs monthly limit — only when there's actual spend.
-                    if usageManager.hasCreditUsage {
-                        if limitMinor > 0 {
-                            ProgressView(value: min(pct, 1.0))
-                                .tint(colorForPercentage(pct))
-                        }
-                        HStack {
-                            Text(limitMinor > 0
-                                 ? "\(fmt(spentMinor)) of \(fmt(limitMinor)) · \(pctLabel)"
-                                 : "\(fmt(spentMinor)) spent")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            if let r = shortReset {
-                                Text(r)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    if usageManager.freeCreditsMinor > 0 {
-                        Text("\(fmt(usageManager.freeCreditsMinor)) free credits left")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .opacity(0.85)
-                    }
-                }
-            }
-
-            // Discreet reassurance line naming whichever of Fable / extra usage
-            // is not being consumed (nothing shown when both are active).
-            if usageManager.hasFetchedData {
-                let fableActive = usageManager.hasWeeklyFable && usageManager.weeklyFableUsage >= 1
-                let extraActive = usageManager.hasCreditUsage || usageManager.freeCreditsMinor > 0
-                if !fableActive || !extraActive {
-                    Text(
-                        !fableActive && !extraActive ? "No Fable or extra usage"
-                        : !extraActive ? "No extra usage"
-                        : "No Fable usage"
-                    )
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .opacity(0.6)
-                }
-            }
-            }
-
-            if usageManager.hasFetchedData {
-            Divider()
-
-            HStack {
-                Text("Last updated: \(formatTime(usageManager.lastUpdated))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button("Refresh") {
-                    usageManager.fetchUsage()
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-            }
-            }
-
-            Button(showingCookieInput ? "Hide Cookie" : "Set Session Cookie") {
-                showingCookieInput.toggle()
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
-
-            if showingCookieInput {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("How to get your session cookie:")
                         .font(.caption)
-                        .fontWeight(.semibold)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("1. Go to Settings > Usage on claude.ai")
-                        Text("2. Press F12 (or Cmd+Option+I)")
-                        Text("3. Go to Network tab")
-                        Text("4. Refresh page, click 'usage' request")
-                        Text("5. Find 'Cookie' in Request Headers")
-                        Text("6. Copy full cookie value\n   (starts with anthropic-device-id=...)")
-                    }
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Paste full cookie string:")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        VStack(spacing: 4) {
-                            PasteableTextField(text: $sessionCookieInput, placeholder: "Paste cookie here...")
-                                .frame(height: 60)
-                                .cornerRadius(4)
-
-                            HStack(spacing: 8) {
-                                Button("Save Cookie & Fetch") {
-                                    NSLog("ClaudeUsage: Save clicked, input length: \(sessionCookieInput.count)")
-                                    if sessionCookieInput.isEmpty {
-                                        usageManager.errorMessage = "Cookie field is empty!"
-                                    } else {
-                                        usageManager.saveSessionCookie(sessionCookieInput)
-                                        usageManager.fetchUsage()
-                                        usageManager.errorMessage = "Cookie saved, fetching..."
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-
-                                if usageManager.hasFetchedData {
-                                    Button("Clear Cookie") {
-                                        sessionCookieInput = ""
-                                        usageManager.clearSessionCookie()
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
-                    }
                 }
-                .padding(8)
-                .background(Color.secondary.opacity(0.1))
-                .cornerRadius(6)
-            }
 
-            // Support Section
-            Button(action: {
-                NSWorkspace.shared.open(URL(string: "https://donate.stripe.com/3cIcN5b5H7Q8ay8bIDfIs02")!)
-            }) {
-                HStack(spacing: 4) {
-                    Text("☕")
-                    Text("Buy Dev a Coffee")
-                }
+                settingsSection
             }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            .foregroundColor(.orange)
+            .padding()
+        }
+        .frame(width: 320)
+    }
 
-            // Settings Section
+    // Accounts arrive already sorted by provider then label (engine `sortedKeys`), so a
+    // provider header is emitted only when a provider actually has accounts — a provider
+    // with none is simply never encountered, satisfying §7.2's "omit empty sections".
+    private var providerGroups: [(provider: ProviderKind, accounts: [AccountPresentation])] {
+        var groups: [(provider: ProviderKind, accounts: [AccountPresentation])] = []
+        for account in store.accounts {
+            if var last = groups.last, last.provider == account.ref.provider {
+                last.accounts.append(account)
+                groups[groups.count - 1] = last
+            } else {
+                groups.append((provider: account.ref.provider, accounts: [account]))
+            }
+        }
+        return groups
+    }
+
+    private func providerName(_ provider: ProviderKind) -> String {
+        switch provider {
+        case .anthropic: return "CLAUDE"
+        case .codex: return "CODEX"
+        }
+    }
+
+    // MARK: - Settings (interim: still backed by the legacy manager's UserDefaults
+    // settings — task 11 replaces this whole sub-view with the §7.3 SettingsView).
+
+    private var settingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Button(showingSettings ? "Hide Settings" : "Settings") {
                 showingSettings.toggle()
             }
@@ -315,8 +101,7 @@ struct UsageView: View {
                         }
                     )) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Open at Login")
-                                .font(.caption)
+                            Text("Open at Login").font(.caption)
                             Text("Launch app automatically when you log in")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
@@ -333,9 +118,8 @@ struct UsageView: View {
                             }
                         )) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Enable Notifications")
-                                    .font(.caption)
-                                Text("Get alerts at 25%, 50%, 75%,\nand 90% session usage")
+                                Text("Enable Notifications").font(.caption)
+                                Text("Get alerts at 25%, 50%, 75%,\nand 90% usage")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -364,8 +148,7 @@ struct UsageView: View {
                             }
                         )) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Keyboard Shortcut (⌘U)")
-                                    .font(.caption)
+                                Text("Keyboard Shortcut (⌘U)").font(.caption)
                                 Text("Toggle popup from anywhere.\nDisable if it conflicts with other apps.")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
@@ -393,53 +176,212 @@ struct UsageView: View {
                 .cornerRadius(6)
             }
         }
-        .padding()
-        }
-        .frame(width: 360)
-        .onAppear {
-            // Load saved cookie when view appears
-            if let savedCookie = UserDefaults.standard.string(forKey: "claude_session_cookie") {
-                sessionCookieInput = String(savedCookie.prefix(20)) + "..."
+    }
+
+    static func timeString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f.string(from: date)
+    }
+}
+
+// One account's collapsed row, expandable to its windows and Extra line. It renders
+// exactly the state the engine handed it: `pending` is a spinner (NEVER a zeroed bar,
+// which reads as a genuine 0%), `signedOut`/`expired` are a non-expandable sign-in hint
+// (NEVER an error), `stale` carries an "as of" time, and a rate-limited account shows its
+// degraded cadence. `.unknown` renders as "—", never 0% and never another window's number.
+private struct AccountCard: View {
+    let account: AccountPresentation
+    let store: UsageStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            header
+            if account.isExpanded, let snapshot = account.state.readableSnapshot {
+                expandedBody(snapshot)
+                    .padding(.leading, 16)
+                    .padding(.top, 2)
+            } else if let note = account.degradationNote {
+                // §6/§7.2: a stretched cadence must be visible on the account's OWN card —
+                // and a rate-limited account is .active/.stale, so its default COLLAPSED
+                // row would otherwise show a plain bar and read as fresh. When expanded,
+                // `expandedBody` already carries the note; this is the collapsed twin.
+                Text(note)
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+                    .padding(.leading, 16)
             }
-            // Force refresh to ensure progress bars show colors
-            usageManager.updatePercentages()
         }
     }
 
-    func formatNumber(_ number: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
-    }
+    private var header: some View {
+        HStack(spacing: 6) {
+            if isExpandable {
+                Image(systemName: account.isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 10)
+            } else {
+                // Keep the label column aligned with expandable rows.
+                Color.clear.frame(width: 10, height: 1)
+            }
 
-    func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
+            Text(account.ref.label)
+                .font(.subheadline)
+                .lineLimit(1)
 
-    func formatResetTime(_ date: Date, includeDate: Bool = false) -> String {
-        let formatter = DateFormatter()
+            Spacer(minLength: 8)
 
-        if includeDate {
-            // Format: "on 31 Jan 2026 at 7:59 AM"
-            formatter.dateFormat = "d MMM yyyy 'at' h:mm a"
-            return "on \(formatter.string(from: date))"
-        } else {
-            formatter.timeStyle = .short
-            formatter.dateStyle = .none
-            return "at \(formatter.string(from: date))"
+            trailing
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isExpandable else { return }
+            store.setExpanded(!account.isExpanded, for: account.ref.id)
         }
     }
 
-    func colorForPercentage(_ percentage: Double) -> Color {
-        if percentage < 0.7 {
-            return .green
-        } else if percentage < 0.9 {
-            return .orange
-        } else {
-            return .red
+    // The right-hand summary for the collapsed row, one rendering per state category.
+    @ViewBuilder private var trailing: some View {
+        switch account.state {
+        case .pending:
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.6)
+                .frame(height: 12)
+        case .signedOut, .expired:
+            // The recovery CLI is the account's OWN provider's — a lapsed Codex account
+            // must not be told to sign in via Claude Code.
+            Text("Sign in via \(account.ref.provider.cliName)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        case .failed(let note):
+            Text(note)
+                .font(.caption)
+                .foregroundColor(.orange)
+                .lineLimit(1)
+        case .active(let snapshot), .stale(let snapshot, _):
+            UsageBar(utilization: Snapshot.bindingUtilization(of: snapshot.windows) ?? .unknown)
+                .frame(width: 120)
         }
     }
 
+    // Only an account with a readable snapshot (active/stale) has windows to expand into.
+    private var isExpandable: Bool { account.state.readableSnapshot != nil }
+
+    @ViewBuilder private func expandedBody(_ snapshot: Snapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if case .stale(_, _) = account.state {
+                Text("as of \(UsageView.timeString(snapshot.fetchedAt))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            if let note = account.degradationNote {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+
+            ForEach(Array(snapshot.windows.enumerated()), id: \.offset) { _, window in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(window.label)
+                            .font(.caption)
+                        Spacer(minLength: 8)
+                        UsageBar(utilization: window.utilization)
+                            .frame(width: 110)
+                    }
+                    if let resets = window.resetsAt {
+                        Text("resets \(Self.resetString(resets, span: window.id.span))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if let extra = snapshot.spend?.extraLine {
+                HStack(spacing: 6) {
+                    Text("Extra").font(.caption)
+                    Spacer(minLength: 8)
+                    Text(extra)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    // Session-class windows reset within a day, so a wall-clock time is what the user
+    // needs; longer windows reset days out, so weekday + date. The window's SPAN decides
+    // the format, never a hardcoded per-window string.
+    private static func resetString(_ date: Date, span: WindowSpan) -> String {
+        let f = DateFormatter()
+        switch span {
+        case .session:
+            f.timeStyle = .short
+            f.dateStyle = .none
+        case .weekly, .other:
+            f.dateFormat = "EEE d MMM"
+        }
+        return f.string(from: date)
+    }
+}
+
+// A percentage as a coloured bar plus its number, or "—" when unknown. `.unknown` is
+// NOT 0%: it renders with no fill and a dash, so an account we cannot read right now is
+// visibly distinct from one genuinely idle at 0%.
+private struct UsageBar: View {
+    let utilization: Utilization
+
+    var body: some View {
+        switch utilization {
+        case .known(let percent):
+            HStack(spacing: 6) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.2))
+                        Capsule()
+                            .fill(color(percent))
+                            .frame(width: max(0, min(1, Double(percent) / 100)) * geo.size.width)
+                    }
+                }
+                .frame(height: 6)
+                Text("\(percent)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+        case .unknown:
+            HStack(spacing: 6) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(height: 6)
+                Text("—")
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+        }
+    }
+
+    private func color(_ percent: Int) -> Color {
+        if percent < 70 { return .green }
+        if percent < 90 { return .orange }
+        return .red
+    }
+}
+
+// The two states carrying a readable snapshot (active/stale). Every other state has no
+// windows to show and its row is not expandable — the §7.2 rule that signedOut/expired/
+// pending are distinct renderings, not empty cards.
+private extension AccountState {
+    var readableSnapshot: Snapshot? {
+        switch self {
+        case .active(let snapshot): return snapshot
+        case .stale(let snapshot, _): return snapshot
+        case .pending, .signedOut, .expired, .failed: return nil
+        }
+    }
 }

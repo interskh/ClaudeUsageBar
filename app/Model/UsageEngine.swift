@@ -98,6 +98,12 @@ struct AccountPresentation {
     let degradationNote: String?
     let nextPollAt: Date?
     let warnings: [String]
+    // §7.2 / §6: whether this account's card is expanded. It is PER-ACCOUNT state that
+    // must survive a popover close and an app restart, and it rides inside the runtime
+    // (and the persisted account blob) precisely so the account-lifecycle reclaim drops
+    // it with the rest of the account's state — no parallel UI-owned map that would
+    // orphan on departure or misattribute one account's expansion to another.
+    let isExpanded: Bool
 }
 
 // §7.1's one figure per provider. `utilization` is never optional-as-zero: a provider
@@ -139,6 +145,9 @@ final class UsageEngine {
         var snapshot: Snapshot?
         var rawBody: Data?
         var lastBlock: PollBlock?
+        // §7.2 card expansion. In-memory here, persisted in the account blob, reclaimed
+        // with the account — never keyed outside the runtime.
+        var expanded: Bool = false
 
         // §4.1 resolves an included account to exactly one of four credential states,
         // and only ONE of them means "there is something to send upstream". Everything
@@ -321,6 +330,7 @@ final class UsageEngine {
         runtime.stoppedExpiry = state.stoppedExpiry
         runtime.credentialDigest = state.credentialDigest
         runtime.snapshot = state.snapshot?.model(account: runtime.ref)
+        runtime.expanded = state.expanded ?? false
         // A restored account's first poll is still staggered, but never earlier than the
         // 60s floor its persisted `lastFetchAttempt` implies — that is what "cooldown
         // survives relaunch" means in practice.
@@ -416,6 +426,19 @@ final class UsageEngine {
 
     func isEnabled(_ identity: AccountIdentity) -> Bool {
         runtimes[identity.storageKey]?.enabled ?? false
+    }
+
+    // §7.2: card expansion persists across popover opens and app restarts. It is keyed on
+    // the durable identity and stored inside the account's own blob, so task 7's
+    // lifecycle reclaims it on departure and a reused identifier cannot resurrect a stale
+    // expansion — the runtime is rebuilt `fresh` (expanded == false) when an identity
+    // reappears after a reclaim.
+    func setExpanded(_ expanded: Bool, for identity: AccountIdentity) {
+        let key = identity.storageKey
+        guard var runtime = runtimes[key], runtime.expanded != expanded else { return }
+        runtime.expanded = expanded
+        runtimes[key] = runtime
+        persist(key)
     }
 
     // MARK: - Requesting fetches
@@ -754,6 +777,7 @@ final class UsageEngine {
         state.stoppedExpiry = runtime.stoppedExpiry
         state.credentialDigest = runtime.credentialDigest
         state.snapshot = runtime.snapshot.map(PersistedSnapshot.init)
+        state.expanded = runtime.expanded
         guard let payload = PersistedCodec.encode(state) else { return }
         pendingOps[key] = .write(storageKey: key, payload: payload)
     }
@@ -810,7 +834,8 @@ final class UsageEngine {
             degradationNote: degradationNote(of: runtime),
             nextPollAt: runtime.stoppedExpiry == nil && runtime.enabled && runtime.credentialUsable
                 ? runtime.nextDueAt : nil,
-            warnings: runtime.snapshot?.warnings ?? []
+            warnings: runtime.snapshot?.warnings ?? [],
+            isExpanded: runtime.expanded
         )
     }
 

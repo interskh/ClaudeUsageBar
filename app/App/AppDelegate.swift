@@ -89,7 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.contentSize = NSSize(width: 320, height: 450)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: UsageView(usageManager: usageManager))
+        popover.contentViewController = NSHostingController(rootView: UsageView(store: store, usageManager: usageManager))
 
         // Set up Cmd+U keyboard shortcut
         setupKeyboardShortcut()

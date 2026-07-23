@@ -584,6 +584,7 @@ enum NotificationEngineTests {
                             lastSuccessAt: nil,
                             degradationNote: nil,
                             nextPollAt: nil,
-                            warnings: [])
+                            warnings: [],
+                            isExpanded: false)
     }
 }

@@ -26,6 +26,18 @@ enum UsageModelTests {
         windowIdentity()
         accountIdentity()
         money()
+        providerRecoveryHint()
+    }
+
+    // §7.2: the signed-out/expired card's "Sign in via …" hint is derived from the
+    // account's own provider, so a lapsed Codex account is directed to the Codex CLI and
+    // an Anthropic one to Claude Code. Regression: hardcoding one provider's CLI for every
+    // card — the money-line's structural twin of the task 8 hardcoded-title defect.
+    private static func providerRecoveryHint() {
+        TestHarness.expect("an Anthropic account's recovery CLI is Claude Code",
+                           ProviderKind.anthropic.cliName, "Claude Code")
+        TestHarness.expect("a Codex account's recovery CLI is Codex, not Claude Code",
+                           ProviderKind.codex.cliName, "Codex")
     }
 
     private static func utilization() {
@@ -216,13 +228,89 @@ enum UsageModelTests {
 
     private static func money() {
         // Regression: floating-point currency, and fabricating a currency/scale the
-        // provider never stated. $0.05 qualified is not the bare string "5".
-        TestHarness.check("qualified money is not equal to the same bare figure",
-                          MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 2)
-                              != .unqualified(raw: "5"))
-        // Regression: dropping the exponent, which turns $0.05 into $5.00.
-        TestHarness.check("scale is part of a qualified amount",
-                          MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 2)
-                              != .qualified(minor: 5, currency: "USD", exponent: 0))
+        // provider never stated. Asserted on the RENDERED text, not enum equality — enum
+        // `!=` survives a scale-loss regression in `display`, the rendered strings do not.
+        // $0.05 qualified renders differently from the bare figure "5".
+        TestHarness.check("qualified money renders differently from the same bare figure",
+                          MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 2).display
+                              != MonetaryAmount.unqualified(raw: "5").display)
+        // Regression: dropping the exponent, which turns $0.05 into $5. Rendered, so a
+        // `display` that silently ignored the exponent would fail here.
+        TestHarness.check("scale changes the rendered amount",
+                          MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 2).display
+                              != MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 0).display)
+
+        moneyDisplay()
+        extraLine()
+    }
+
+    // §7.2's Extra dollar line renders MonetaryAmount → text. Integer-only formatting so
+    // the 100× over-report (task 5) cannot re-enter through a Double.
+    private static func moneyDisplay() {
+        // Regression: emitting the minor-unit integer bare — 1500 rendered as $1500
+        // instead of $15.00, a 100× over-report a shipped test once asserted as correct.
+        TestHarness.expect("USD scales minor units by the exponent",
+                           MonetaryAmount.qualified(minor: 1500, currency: "USD", exponent: 2).display,
+                           "$15.00")
+        // Regression: $0.00 vs an empty string — a genuine zero spend must read as $0.00.
+        TestHarness.expect("zero spend is $0.00",
+                           MonetaryAmount.qualified(minor: 0, currency: "USD", exponent: 2).display,
+                           "$0.00")
+        // Regression: a sub-unit figure losing its leading zero (5 → $.05).
+        TestHarness.expect("sub-unit pads a leading integer zero",
+                           MonetaryAmount.qualified(minor: 5, currency: "USD", exponent: 2).display,
+                           "$0.05")
+        // Regression: exponent 0 fabricating a decimal point.
+        TestHarness.expect("exponent 0 has no fractional part",
+                           MonetaryAmount.qualified(minor: 15, currency: "USD", exponent: 0).display,
+                           "$15")
+        // A negative amount (a refund/credit — task 5 keeps these) signs the figure, not
+        // the currency symbol drift.
+        TestHarness.expect("negative USD signs the amount",
+                           MonetaryAmount.qualified(minor: -250, currency: "USD", exponent: 2).display,
+                           "-$2.50")
+        // A non-USD currency is qualified with its code, never a $ implying dollars.
+        TestHarness.expect("non-USD currency uses its code, not $",
+                           MonetaryAmount.qualified(minor: 1500, currency: "EUR", exponent: 2).display,
+                           "EUR 15.00")
+        // Regression: an unqualified balance having a currency/scale INFERRED (§5.2/§3).
+        // "15" free credits with no currency is shown exactly as stated — not "$15.00".
+        TestHarness.expect("unqualified amount is shown verbatim",
+                           MonetaryAmount.unqualified(raw: "15").display,
+                           "15")
+
+        // Regression: the formatter TRAPPING on a drifted/hostile provider-or-persisted
+        // value instead of degrading. `abs(Int.min)` traps (task 5's `Int(1e30)` class);
+        // `exponent + 1` overflows at Int.max; a huge finite exponent forces a pathological
+        // `String(repeating:)`. Each must produce a BOUNDED string, never crash.
+        TestHarness.expect("Int.min minor does not trap and renders its full magnitude",
+                           MonetaryAmount.qualified(minor: Int.min, currency: "USD", exponent: 2).display,
+                           "-$92233720368547758.08")
+        TestHarness.expect("Int.max exponent does not overflow, degrading to the bare figure",
+                           MonetaryAmount.qualified(minor: 1500, currency: "USD", exponent: Int.max).display,
+                           "$1500")
+        TestHarness.expect("a huge finite exponent degrades to the bare figure, not a giant allocation",
+                           MonetaryAmount.qualified(minor: 1500, currency: "USD", exponent: 1_000_000).display,
+                           "$1500")
+    }
+
+    private static func extraLine() {
+        // §7.2: spend used joined with the free balance. The balance is UNQUALIFIED — it
+        // carries NO currency (§5.2) — so it must render EXACTLY as the provider stated.
+        // The fixture is deliberately symbol-free ("15", not "$15"): a "$15" fixture could
+        // not tell "renders verbatim" apart from "fabricates a $", the money-side twin of
+        // manufactured headroom.
+        TestHarness.expect("extra line joins used spend and an unqualified balance verbatim",
+                           Spend(used: .qualified(minor: 0, currency: "USD", exponent: 2),
+                                 balance: .unqualified(raw: "15")).extraLine,
+                           "$0.00 · 15 free")
+        // Balance alone (no spend yet) still shows the free credits — with no fabricated $.
+        TestHarness.expect("an unqualified balance is never given a fabricated currency symbol",
+                           Spend(balance: .unqualified(raw: "15")).extraLine,
+                           "15 free")
+        // Regression: fabricating "$0.00" for an account the provider said nothing about.
+        // Neither figure present → no line, so the card omits Extra entirely.
+        TestHarness.check("empty spend produces no extra line",
+                          Spend().extraLine == nil)
     }
 }

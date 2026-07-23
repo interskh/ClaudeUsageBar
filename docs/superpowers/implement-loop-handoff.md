@@ -792,3 +792,104 @@ shims), `Core/LegacyUsageManager.swift` (`scheduleTimer` inert), `Core/Notifier.
 evaluate-on-publish seam test), `Tests/main.swift`. 891 checks. The real path launch → real
 Keychain → real HTTPS → menu bar is now REAL and screenshot-verified; only the popover body
 and settings remain on the old surface.
+
+---
+
+## Task 10 — the popover: per-account cards, and the §7.4 removals
+
+Rewrote the popover from the cookie-era single-account `UsageView` into §7.2's
+provider-grouped, per-account collapsed cards driven entirely by `UsageStore`, removed the
+cookie/coffee UI, and resolved the long-carried `spend.percent` regression. The artifact is
+a screenshot with a quality verdict, and it passed on quality: `default` 73% amber matching
+the menu bar, expanded per-window rows (Session with a time reset, Weekly with a date
+reset, a model-scoped Fable window from `windowLabel`), `work-ethan` rendering "Sign in via
+Claude Code" as a non-error non-zero hint, and the Extra line showing Claude's qualified
+`$0.00` beside Codex's unqualified `0 free` — the two money formats correctly distinct.
+
+**Decision: the `spend.percent` regression is resolved by the redesign, not by restoring the
+field.** Since task 5 the handoff carried `spend.percent` as a live regression — v1.3.2
+rendered an extra-usage *percentage bar* from it, and the new `Spend` has no such field.
+§7.2 replaced that bar with a *dollar line*: `Extra <used> · <balance> free`, built from
+`Spend.used` (qualified minor units + currency + exponent) and the credits `balance`
+(**unqualified** — no currency or scale inferred, per §5.2). The percentage was never needed
+once the UI shows money; `spend.percent` is intentionally not surfaced, and no percent is
+derived from `used/limit` (limit is often null).
+
+**Decision: card expansion is store-owned per-account state, reclaimed by task 7's
+lifecycle.** `AccountPresentation.isExpanded` + a `@MainActor UsageStore.setExpanded(_:for:)`,
+persisted in the existing version-2 `PersistedAccountState` as an **additive optional field**
+`expanded: Bool?`. **Rejected: a parallel `UserDefaults` map in the UI** keyed by label —
+it would re-introduce the orphan-key growth task 7 eliminated and could misattribute one
+account's expansion to another. Keying on `AccountIdentity.storageKey` and riding task 7's
+roster reclamation means expansion drops with the account and a returning identity does not
+inherit a stale flag — no parallel keyspace, no resurrection.
+
+**The additive-optional persistence change was the make-or-break risk, and it holds.**
+`expanded: Bool?` is `Optional`, so synthesized `Decodable` uses `decodeIfPresent`: a v2 blob
+written before the field existed decodes the missing key to `nil` → a collapsed card, NOT a
+decode failure. That distinction is load-bearing — task 7's codec returns `nil` on a genuine
+decode failure and the engine then *reclaims* (wipes) the account, so had the field been made
+required, every pre-existing account would be silently erased on the first launch after
+upgrade. No version bump; the ledger namespace, ABA claim token, and horizon projection are
+untouched. The restore default (`state.expanded ?? false`) is now pinned by a test that
+restores a legacy blob through the engine and asserts the presented card is collapsed.
+
+**Two review findings were this run's recurring failure families, in the new UI layer:**
+- **A provider name hardcoded in user-facing text** (codex): a signed-out *Codex* account was
+  told "Sign in via *Claude Code*", misdirecting a lapsed ChatGPT user to the wrong CLI —
+  the same shape as task 8's hardcoded "Claude Usage Alert" title. Fixed with a pure,
+  testable `ProviderKind.cliName`; the hint now derives from the account's provider.
+- **An arithmetic trap on a provider-controlled, persisted value** (codex): the money
+  formatter's `abs(minor)` traps on `Int.min` and `exponent + 1` overflows at `Int.max` —
+  the same species as task 5's `Int(1e30)` crash. Fixed with `minor.magnitude` (which cannot
+  trap) and an exponent bound (`0 < exponent <= 30`, else the raw figure); reproduced at
+  SIGTRAP before, gone after.
+
+**Decision: a rate-limited account's degradation is shown on the COLLAPSED row, not only
+when expanded** (reviewer). `AccountPresentation.degradationNote`'s task-7 contract requires
+the stretched cadence be visible in the account's own card and *never just appear fresh* —
+but the collapsed row is the card's default, so rendering the note only inside the expanded
+body left a throttled account looking fresh until the user expanded it.
+
+**Confirmed single-sourced (not re-derived):** the card's per-account figure calls
+`Snapshot.bindingUtilization(of: snapshot.windows)` on the engine's already-projected
+snapshot; the menu bar applies the identical function to `project(snapshot, now).windows`.
+Same function, same projected windows — they can differ only in *presence* (the menu bar
+omits an over-horizon account, the card shows it as unknown), which is the §6/§7.1 intent,
+never a numeric disagreement.
+
+**§7.4 removals done here** (they lived in this view): the entire cookie input block,
+`PasteableTextField`/`PasteableNSTextView`/`CustomTextField` (file `PasteableTextField.swift`
+deleted), the Save/Clear Cookie buttons, the "Buy Dev a Coffee" Stripe button; both
+`usageManager.fetchUsage()` sites severed (Refresh → `store.refresh()`). `import WebKit` and
+the `-framework WebKit` flags were already absent (the only remaining `WebKit` string is a
+browser User-Agent literal inside `LegacyUsageManager.swift`, task 11's file, not a
+dependency).
+
+### What task 11 must do
+
+The settings gear is still wired to the inert legacy manager (Open-at-Login, notifications
+toggle/test button, ⌘U shortcut) — a documented two-source interim. Task 11 builds the real
+`SettingsView` (§7.3: per-account enable checkboxes, the §4.1 registered-locations
+lifecycle), repoints the notification toggle control to `AccountNotifier` (the
+`notifications_enabled` state is already honoured from task 9), then **deletes
+`Core/LegacyUsageManager.swift` and `Core/Notifier.swift`** with their last call sites —
+closing the final fake leg.
+
+**A process note for the whole-worktree review:** during task 10's review a fresh reviewer's
+mutation script used `git checkout` to revert mutations on this *uncommitted* work, resetting
+`UsageModel/UsageEngine/UsagePersistence.swift` to HEAD; the reviewer reconstructed them from
+captured content and disclosed it. Tree integrity was independently verified before commit
+(diff shape 451/458 matched the doer's report, all reported defects physically present, 915
+checks green, six-dir typecheck clean); residual risk is comment-byte cosmetics only. The
+transferable rule: a mutation harness in a shared uncommitted worktree must snapshot bytes,
+never `git checkout`.
+
+**Touches:** `UI/PopoverView.swift` (full rewrite), `Model/UsageModel.swift`
+(`MonetaryAmount.display`/`scaledString`, `Spend.extraLine`, `ProviderKind.cliName`),
+`Model/UsageEngine.swift` (`isExpanded`/`setExpanded`/restore wiring),
+`Model/UsagePersistence.swift` (additive `expanded: Bool?` — shared surface),
+`Core/UsageStore.swift` (`setExpanded` shell), `App/AppDelegate.swift` (1 line),
+`Tests/{UsageModelTests,UsageEngineTests,NotificationEngineTests}.swift`. Deleted
+`UI/PasteableTextField.swift`. 915 checks. The popover path launch → real credentials → real
+fetch → cards is now REAL; only the settings gear remains on the legacy surface.

@@ -167,6 +167,72 @@ enum UsageEngineTests {
         theTooltipNamesTheBindingWindow()
         providerOrderIsHonoured()
         persistenceRoundTrip()
+        cardExpansionPersistsAndReclaims()
+    }
+
+    // §7.2/§6: card expansion is per-account state keyed on the DURABLE identity. It must
+    // survive a relaunch, be reclaimed when the account leaves discovery, and never
+    // resurrect for a later occupant of the same identifier — the same lifecycle every
+    // other per-account slot follows, which is exactly why it lives inside the runtime and
+    // the persisted account blob rather than a parallel UI-owned map keyed by label.
+    static func cardExpansionPersistsAndReclaims() {
+        let clock = Clock()
+        let engine = UsageEngine(providerOrder: [.anthropic])
+        let account = ref(.anthropic, "expand-uuid", label: "work-fiona")
+        engine.ingest([observation(account, location: "svc")], covering: [.anthropic], now: clock.now)
+
+        TestHarness.check("a freshly discovered card is collapsed",
+                          engine.presentation(for: account.id, now: clock.now)?.isExpanded == false)
+        engine.setExpanded(true, for: account.id)
+        TestHarness.check("expanding a card is reflected in its presentation",
+                          engine.presentation(for: account.id, now: clock.now)?.isExpanded == true)
+
+        // Survives a relaunch: persisted in the account blob, restored on re-discovery.
+        var accounts: [String: PersistedAccountState] = [:]
+        for op in engine.drainPersistence() {
+            if case .write(let key, let payload) = op, PersistedStore.ledgerKey(of: key) == nil {
+                accounts[key] = PersistedCodec.decode(PersistedAccountState.self, from: payload)
+            }
+        }
+        let relaunched = UsageEngine(providerOrder: [.anthropic], restoring: accounts, now: clock.now)
+        relaunched.ingest([observation(account, location: "svc")], covering: [.anthropic], now: clock.now)
+        TestHarness.check("card expansion survives a relaunch",
+                          relaunched.presentation(for: account.id, now: clock.now)?.isExpanded == true)
+
+        // No resurrection: the account leaves discovery, its namespace is reclaimed, and a
+        // later occupant of the SAME identity returns collapsed — a reused id cannot
+        // inherit a stale expansion.
+        clock.advance(60)
+        relaunched.ingest([], covering: [.anthropic], now: clock.now)
+        TestHarness.check("a departed account's namespace is reclaimed",
+                          !relaunched.knownStorageKeys.contains(account.id.storageKey))
+        clock.advance(60)
+        relaunched.ingest([observation(account, location: "svc")], covering: [.anthropic], now: clock.now)
+        TestHarness.check("a returning account is not resurrected expanded",
+                          relaunched.presentation(for: account.id, now: clock.now)?.isExpanded == false)
+
+        // Backward compatibility: a v2 blob written before `expanded` existed carries no
+        // such key. Because the field is OPTIONAL, the absence decodes as nil rather than
+        // failing the whole decode — which the load path would otherwise reclaim,
+        // discarding a live account's cached reading over a merely-added display flag.
+        let legacyV2 = Data(#"{"version":2,"enabled":true,"rung":1,"successStreak":0,"consecutiveFailures":0}"#.utf8)
+        let decoded = PersistedCodec.decode(PersistedAccountState.self, from: legacyV2)
+        TestHarness.check("a v2 blob predating the added field still decodes", decoded != nil)
+        TestHarness.check("and its missing expansion reads as collapsed", decoded?.expanded == nil)
+        TestHarness.expect("while the rest of the old blob is intact", decoded?.rung, 1)
+
+        // The RESTORE DEFAULT is load-bearing, not just the decode. `restore`'s
+        // `state.expanded ?? false` flipping to `?? true` survives every codec check above
+        // — but would restore EVERY pre-upgrade account expanded after an update. Pin the
+        // RENDERED result: restore the legacy blob (no `expanded` key → nil) THROUGH the
+        // engine and assert the presented card comes back collapsed.
+        let legacyKey = account.id.storageKey
+        let fromLegacy = UsageEngine(providerOrder: [.anthropic],
+                                     restoring: [legacyKey: decoded!],
+                                     now: clock.now)
+        fromLegacy.ingest([observation(account, location: "svc")], covering: [.anthropic], now: clock.now)
+        TestHarness.check("a legacy blob with no expansion key restores COLLAPSED, not expanded",
+                          fromLegacy.presentation(for: account.id, now: clock.now)?.isExpanded == false)
     }
 
     // MARK: - Policy units

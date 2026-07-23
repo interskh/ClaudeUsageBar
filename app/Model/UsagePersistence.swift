@@ -231,6 +231,13 @@ struct PersistedAccountState: Codable, Equatable, VersionedPayload {
     // across launches is the exact mistake §6 was written to forbid.
     var credentialDigest: String?
     var snapshot: PersistedSnapshot?
+    // §7.2 card expansion, persisted across restarts. ADDITIVE and OPTIONAL on purpose:
+    // an existing v2 blob written before this field existed has no `expanded` key, and a
+    // non-optional Bool would make `JSONDecoder` throw on the missing key — which the
+    // codec reports as a decode failure and the load path then RECLAIMS, silently
+    // discarding a live account's cached reading for a merely-added display flag. An
+    // Optional decodes the absent key as `nil` (collapsed), so old blobs survive.
+    var expanded: Bool?
 
     // The raw response body of §5 is deliberately ABSENT. It is retained in memory,
     // latest-only, for the life of the process: retention is what §5 asks for, and

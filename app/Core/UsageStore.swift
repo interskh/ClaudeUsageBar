@@ -166,6 +166,14 @@ final class UsageStore: ObservableObject {
 
     func isEnabled(_ identity: AccountIdentity) -> Bool { engine.isEnabled(identity) }
 
+    // §7.2: toggle a card's expansion. The engine persists it inside the account blob;
+    // the shell flushes that write and republishes so the view re-renders.
+    func setExpanded(_ expanded: Bool, for identity: AccountIdentity) {
+        engine.setExpanded(expanded, for: identity)
+        flush()
+        publish(now: Date())
+    }
+
     // §5: diagnostic-only, latest per account, and deliberately not on
     // `AccountPresentation` so no display path can reach it.
     func retainedRawBody(for identity: AccountIdentity) -> Data? {
