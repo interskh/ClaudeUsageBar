@@ -26,10 +26,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // `notifications_enabled` preference is honoured from now (a v1.3.2 user who turned
     // notifications off stays quiet). This is the only notification source in the new app.
     var notifier: AccountNotifier!
-    // Kept only so the cookie-era popover/settings still compile until tasks 10–11 replace
-    // them. It is deliberately INERT: instantiated but never told to fetch or start a
-    // timer, so the app has exactly ONE polling loop — the store's.
-    var usageManager: UsageManager!
+    // App-level settings (login item, ⌘U preference, Accessibility status). The cookie
+    // manager used to own these; it is gone, so they live in their own small @MainActor
+    // type now.
+    var appSettings: AppSettings!
     var menuBarObserver: AnyCancellable?
     var accountsObserver: AnyCancellable?
     var eventMonitor: Any?
@@ -78,18 +78,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.start()
 
-        // Cookie-era manager: instantiated ONLY so `UsageView`/`Settings` still compile
-        // (tasks 10–11 remove them). It must NOT poll — do not call `fetchUsage()` or
-        // `startRefreshTimer()`. Its `init` only reads UserDefaults (no timer, no network,
-        // no Keychain), so leaving those two calls off makes it fully inert and guarantees
-        // the app has exactly one polling loop hitting the rate-limited endpoints.
-        usageManager = UsageManager(statusItem: statusItem, delegate: self)
+        // App-level settings owner (login item, ⌘U preference, Accessibility). Reads the
+        // real system state at init.
+        appSettings = AppSettings()
 
         // Create popover
         popover = NSPopover()
         popover.contentSize = NSSize(width: 320, height: 450)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: UsageView(store: store, usageManager: usageManager))
+        popover.contentViewController = NSHostingController(
+            rootView: UsageView(store: store, appSettings: appSettings, notifier: notifier))
 
         // Set up Cmd+U keyboard shortcut
         setupKeyboardShortcut()
@@ -100,7 +98,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         checkAccessibilityPermissions()
 
         // Only register if user has the shortcut enabled
-        if usageManager.shortcutEnabled {
+        if appSettings.shortcutEnabled {
             registerGlobalHotKey()
         }
     }
@@ -236,10 +234,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // §6: re-run discovery on popover open (throttled inside the store). This is
             // the store's local survey — it costs no upstream request.
             store.popoverWillOpen()
-            // Force UI refresh by updating percentages
-            DispatchQueue.main.async {
-                self.usageManager.updatePercentages()
-            }
 
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 

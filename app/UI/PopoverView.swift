@@ -11,7 +11,8 @@ import AppKit
 // function the menu bar also uses, so the popover and the menu bar cannot disagree.
 struct UsageView: View {
     @ObservedObject var store: UsageStore
-    @ObservedObject var usageManager: UsageManager
+    @ObservedObject var appSettings: AppSettings
+    let notifier: AccountNotifier
     @State private var showingSettings: Bool = false
 
     var body: some View {
@@ -79,8 +80,7 @@ struct UsageView: View {
         }
     }
 
-    // MARK: - Settings (interim: still backed by the legacy manager's UserDefaults
-    // settings — task 11 replaces this whole sub-view with the §7.3 SettingsView).
+    // MARK: - Settings (§7.3: the real SettingsView, on the new engine).
 
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -91,89 +91,7 @@ struct UsageView: View {
             .font(.caption)
 
             if showingSettings {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle(isOn: Binding(
-                        get: { usageManager.openAtLogin },
-                        set: { newValue in
-                            usageManager.openAtLogin = newValue
-                            usageManager.applyLoginItem(newValue)
-                            usageManager.saveSettings()
-                        }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Open at Login").font(.caption)
-                            Text("Launch app automatically when you log in")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .toggleStyle(.checkbox)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle(isOn: Binding(
-                            get: { usageManager.notificationsEnabled },
-                            set: { newValue in
-                                usageManager.notificationsEnabled = newValue
-                                usageManager.saveSettings()
-                            }
-                        )) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Enable Notifications").font(.caption)
-                                Text("Get alerts at 25%, 50%, 75%,\nand 90% usage")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .toggleStyle(.checkbox)
-
-                        Button("Test Notification") {
-                            usageManager.sendTestNotification()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle(isOn: Binding(
-                            get: { usageManager.shortcutEnabled },
-                            set: { newValue in
-                                usageManager.shortcutEnabled = newValue
-                                usageManager.saveSettings()
-                                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                                    appDelegate.setShortcutEnabled(newValue)
-                                }
-                            }
-                        )) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Keyboard Shortcut (⌘U)").font(.caption)
-                                Text("Toggle popup from anywhere.\nDisable if it conflicts with other apps.")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .toggleStyle(.switch)
-
-                        if usageManager.shortcutEnabled && !usageManager.isAccessibilityEnabled {
-                            Button("Grant Accessibility Permission") {
-                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-
-                            Text("Accessibility permission may be needed\nfor the shortcut to work in all apps")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(8)
-                .background(Color.secondary.opacity(0.1))
-                .cornerRadius(6)
+                SettingsView(store: store, appSettings: appSettings, notifier: notifier)
             }
         }
     }

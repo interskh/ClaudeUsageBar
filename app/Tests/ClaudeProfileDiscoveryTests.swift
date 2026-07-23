@@ -194,6 +194,107 @@ enum ClaudeProfileDiscoveryTests {
         oversizedIdentityFile()
         orphanCredentialEntries()
         labelsAndSubtitles()
+        registeredLocationValidation()
+    }
+
+    // §4.1/§7.3: a user-typed registered location is validated AT add-time, so a location
+    // that fails the identity gate is REPORTED to the user rather than accepted and then
+    // silently ignored by the survey. The acceptance path also normalises the path so the
+    // store persists the canonical form the survey keys on.
+    private static func registeredLocationValidation() {
+        let (fs, credentials) = world()
+        let discovery = ClaudeProfileDiscovery(fileSystem: fs, credentials: credentials,
+                                               log: { _ in })
+
+        // PASS: an arbitrary absolute directory whose config carries an oauthAccount. The
+        // registered team-alpha profile is exactly this on the target machine's mirror.
+        // Signed-in credential health is NOT required — identity gate alone decides.
+        TestHarness.expect(
+            "a valid config location is accepted with its normalized path and label",
+            discovery.validateCandidate("/opt/fixture-profiles/team-alpha"),
+            .accepted(normalizedPath: "/opt/fixture-profiles/team-alpha", label: "team-alpha")
+        )
+
+        // PASS through a ~-relative path: the accepted path is the normalised absolute
+        // form, not the raw input — otherwise the survey would key on a string it never
+        // sees. `.claude-work` has an oauthAccount and only "no renewal material"
+        // credentials (signedOut-class), so it validates on identity alone.
+        TestHarness.expect(
+            "~-relative input is accepted as its normalized absolute path",
+            discovery.validateCandidate("~/.claude-work"),
+            .accepted(normalizedPath: home + "/.claude-work", label: "work")
+        )
+
+        // FAIL — reported, not silently accepted:
+        // (1) a directory that exists but whose config has no oauthAccount.
+        if case .rejected = discovery.validateCandidate(home + "/.claude-stub") {
+            TestHarness.check("a directory with no oauthAccount is rejected", true)
+        } else {
+            TestHarness.check("a directory with no oauthAccount is rejected", false)
+        }
+        // (1b) an oauthAccount that is PRESENT but names no identifier field — the gate
+        // must reject on empty identity components, not just on a missing oauthAccount.
+        // `.claude-anon` carries exactly this shape. (Kills the empty-components branch,
+        // which the missing-oauthAccount stub above does not reach.)
+        if case .rejected = discovery.validateCandidate(home + "/.claude-anon") {
+            TestHarness.check("an oauthAccount with no identifier is rejected", true)
+        } else {
+            TestHarness.check("an oauthAccount with no identifier is rejected", false)
+        }
+        // (2) a relative path — task 4's contract rejects it, and so must add-time. This
+        // must be pinned by the NORMALIZE guard specifically, not incidentally by the
+        // downstream is-directory check: the real `SystemProfileFileSystem.isDirectory`
+        // resolves a relative path against the process CWD (`fileExists(atPath:)`), so a
+        // relative input CAN pass is-directory in production. The fake FS is therefore
+        // rigged so the relative path DOES resolve to a valid, oauthAccount-carrying
+        // directory — with the normalize guard removed this would be accepted, so asserting
+        // rejection here genuinely kills the guard's mutant (it is NOT equivalent). A
+        // window-server-launched app has no defensible CWD; task 4 rejects relative paths
+        // precisely to stop scanning a location the app never meant to.
+        var relFS = fs
+        relFS.directories.insert("relative-config")
+        relFS.files["relative-config/.claude.json"] = fixture("identity-registered.json")
+        let relDiscovery = ClaudeProfileDiscovery(fileSystem: relFS,
+                                                  credentials: credentials, log: { _ in })
+        if case .rejected = relDiscovery.validateCandidate("relative-config") {
+            TestHarness.check("a relative path that resolves to a valid dir is still rejected", true)
+        } else {
+            TestHarness.check("a relative path that resolves to a valid dir is still rejected", false)
+        }
+        // (3) a path with no directory at all.
+        if case .rejected = discovery.validateCandidate("/opt/does-not-exist") {
+            TestHarness.check("a non-existent directory is rejected", true)
+        } else {
+            TestHarness.check("a non-existent directory is rejected", false)
+        }
+        // (4) the home directory itself is never a profile.
+        if case .rejected = discovery.validateCandidate(home) {
+            TestHarness.check("the home directory is rejected", true)
+        } else {
+            TestHarness.check("the home directory is rejected", false)
+        }
+        // (5) a config FILE exists at the path but the path is not a directory — the
+        // is-a-directory guard must reject it, not fall through to the identity file and
+        // accept a non-directory. (Kills the isDirectory guard, which the identity gate
+        // alone does not, since the file is a valid oauthAccount config.)
+        var looseFS = fs
+        looseFS.files["/opt/loose/.claude.json"] = fixture("identity-registered.json")
+        let looseDiscovery = ClaudeProfileDiscovery(fileSystem: looseFS,
+                                                    credentials: credentials, log: { _ in })
+        if case .rejected = looseDiscovery.validateCandidate("/opt/loose") {
+            TestHarness.check("a config file at a non-directory path is rejected", true)
+        } else {
+            TestHarness.check("a config file at a non-directory path is rejected", false)
+        }
+
+        // The load-bearing distinction: a rejection is a DISTINCT outcome from acceptance,
+        // so the UI can surface a reason. A gate that returned `.accepted` for the stub
+        // (the silent-drop failure §4.1 forbids) would make this equal.
+        TestHarness.check(
+            "rejection and acceptance are distinguishable outcomes",
+            discovery.validateCandidate(home + "/.claude-stub")
+                != discovery.validateCandidate("/opt/fixture-profiles/team-alpha")
+        )
     }
 
     private static func pathNormalization() {

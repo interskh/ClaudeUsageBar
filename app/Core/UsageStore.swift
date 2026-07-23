@@ -54,6 +54,14 @@ final class UsageStore: ObservableObject {
     private var surveyTimer: Timer?
     private var isSurveying = false
     private var lastSurveyStartedAt: Date?
+    // A survey that had to be dropped because one was already in flight (§6/§4.1). A
+    // location change (add/remove) MUST always result in an eventual fresh survey — if its
+    // `survey()` is swallowed by the in-flight guard, the change would otherwise not be
+    // observed until the next 60s timer tick, and a removed account would keep its stale
+    // state (and a re-add in that window resurrect it). This flag is re-checked when the
+    // in-flight survey clears, so the follow-up runs strictly AFTER it. No ABA token is
+    // needed: `guard !isSurveying` already serialises surveys.
+    private var pendingResurvey = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -194,6 +202,43 @@ final class UsageStore: ObservableObject {
         defaults.stringArray(forKey: registeredLocationsKey) ?? []
     }
 
+    // §4.1/§7.3: validate a user-typed candidate location AT registration, so a path that
+    // fails the identity gate is reported to the user immediately rather than accepted and
+    // silently ignored by the next survey. Runs the real discovery's pure gate against the
+    // real filesystem. The UI adds the returned `normalizedPath` (not the raw input) so the
+    // persisted location is the canonical form the survey keys on.
+    func validateLocation(_ location: String) -> RegisteredLocationValidation {
+        UsageStore.makeDiscovery().validateCandidate(location)
+    }
+
+    // Add a location, idempotently, and re-survey so it is discovered now. The invariant —
+    // only a validated, normalized, absolute path may be persisted — lives HERE at the
+    // owner, not at the caller: a location the survey cannot honour must never enter the
+    // store even if a future caller skips the UI's `validateLocation`. The UI still calls
+    // `validateLocation` first for the user-facing rejection message; this is the defence
+    // behind it. The persisted string is the NORMALIZED form the survey keys on.
+    func addLocation(_ location: String) {
+        guard case .accepted(let normalizedPath, _) = validateLocation(location) else {
+            NSLog("⚠️ Refused to register a location that fails the identity gate: %@", location)
+            return
+        }
+        var current = registeredLocations
+        guard !current.contains(normalizedPath) else { return }
+        current.append(normalizedPath)
+        registeredLocations = current
+    }
+
+    // Remove a registration. §6: the account then vanishes from the next survey, and task
+    // 7's ingest reclaims its namespaced persisted state as a unit. The setter's `survey()`
+    // triggers that re-survey — and if a survey is already in flight, the `pendingResurvey`
+    // flag guarantees a fresh survey runs once it clears, so the removal is ALWAYS observed
+    // rather than lost to the in-flight guard. (If the same identity is ALSO reachable
+    // through a conventional location, it correctly stays; only a purely-registered account
+    // is dropped.)
+    func removeLocation(_ path: String) {
+        registeredLocations = registeredLocations.filter { $0 != path }
+    }
+
     // MARK: - Driving the engine
 
     private func pump(now: Date = Date()) {
@@ -227,9 +272,18 @@ final class UsageStore: ObservableObject {
     // off the main actor because a credential lookup blocks for as long as its own
     // timeout, and this pass performs one per profile.
     private func survey(notBefore floor: TimeInterval = 0) {
-        guard !isSurveying else { return }
         let now = Date()
+        // The user-driven throttle (popover open) is a genuine "too soon, skip it" — it
+        // does NOT queue a follow-up. A location change always calls survey() with floor 0,
+        // so it never lands here.
         if floor > 0, let last = lastSurveyStartedAt, now.timeIntervalSince(last) < floor {
+            return
+        }
+        // A survey is already running. Do not drop the request: mark it pending so a fresh
+        // survey runs once the in-flight one clears (§4.1 — a location change must always
+        // be observed). Serialisation by `isSurveying` guarantees the follow-up runs after.
+        guard !isSurveying else {
+            pendingResurvey = true
             return
         }
         lastSurveyStartedAt = now
@@ -248,6 +302,14 @@ final class UsageStore: ObservableObject {
             self.flush()
             self.publish(now: now)
             self.pump(now: now)
+            // A location change (or another survey request) arrived while this one was in
+            // flight, captured stale `locations`. Run one more, now, with the current set —
+            // this is what makes remove-during-survey reclaim, and re-add re-discover,
+            // rather than waiting up to 60s for the next timer tick.
+            if self.pendingResurvey {
+                self.pendingResurvey = false
+                self.survey()
+            }
         }
     }
 

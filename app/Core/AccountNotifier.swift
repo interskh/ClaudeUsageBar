@@ -14,8 +14,8 @@ import AppKit
 // DEPRECATION CARRIED FORWARD: `NSUserNotification` is superseded by
 // `UserNotifications`/`UNUserNotificationCenter`. Migrating needs an authorization flow
 // and a bundle-identity story out of scope for this correctness fix, and the app ships on
-// `NSUserNotification` today (see `Core/Notifier.swift`, which this replaces). Kept to
-// match the existing convention; the migration is a separate piece of work.
+// `NSUserNotification` today — the same API the deleted cookie-era `Core/Notifier.swift`
+// used. Kept to match that convention; the migration is a separate piece of work.
 @MainActor
 final class AccountNotifier {
     // The same defaults key the shipped app used for the master toggle, so a user who

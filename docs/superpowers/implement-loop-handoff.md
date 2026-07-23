@@ -893,3 +893,114 @@ never `git checkout`.
 `Tests/{UsageModelTests,UsageEngineTests,NotificationEngineTests}.swift`. Deleted
 `UI/PasteableTextField.swift`. 915 checks. The popover path launch → real credentials → real
 fetch → cards is now REAL; only the settings gear remains on the legacy surface.
+
+---
+
+## Task 11 — the real SettingsView, and the deletion that closes the fake-entrypoint leg
+
+The final cutover. Built `SettingsView` (§7.3) on the new engine, moved app-level settings
+to a new `AppSettings` owner, implemented the §4.1 registered-locations lifecycle, and
+**deleted the entire legacy cookie subsystem** — `LegacyUsageManager.swift`, `Notifier.swift`,
+`Settings.swift`, so the type `UsageManager` no longer exists anywhere. **The
+fake-entrypoint leg every ledger carried since task 3 is now closed:** launch → real Keychain
+→ real HTTPS → menu bar + popover + settings, all on the new engine, no cookie path to fall
+back to. The proof a deletion task needs is the gate `build.sh --test` cannot give — a clean
+`swiftc -typecheck` over all six directories, which is the only thing that catches a dangling
+reference to a deleted type in `App/`/`Core/`/`UI/`.
+
+**A deletion task's real risk is silent loss, so every legacy behaviour was enumerated to a
+new home** (recorded in the untracked log): cookie poll/parse/backoff — dead since task 9;
+`notifications_enabled` → `AccountNotifier` (the toggle now writes it); Open-at-Login +
+`SMAppService.register()/unregister()` → `AppSettings`, reflecting real system status not a
+stored bool; accessibility status + launch prompt → `AppSettings`; `shortcut_enabled` + the
+⌘U Carbon hotkey enable/disable → `AppSettings` (pref) + `AppDelegate` (the hotkey ref);
+`sendTestNotification` → `AccountNotifier`. Each was verified to *act*, not merely store the
+preference — a setting that quietly stops registering the login item or toggling the hotkey
+is exactly the regression this task must not ship.
+
+**Decision: a new `@MainActor AppSettings` owns genuinely app-level settings** — not
+per-account (`UsageStore`) and not notification (`AccountNotifier`). The Carbon hotkey ref
+and register/unregister stay on `AppDelegate`; `AppSettings` only records the preference.
+
+**§4.1 registered locations — add-time validation runs the SAME gate as the survey.**
+`ClaudeProfileDiscovery.validateCandidate` applies normalize → not-home → is-directory →
+identity-gate through the *same shared* methods the survey uses, so the two cannot drift (a
+divergence would let a location validate but never appear, or be rejected though it would
+appear). A gate failure is surfaced to the user and **not registered**; the persisted string
+is the **normalized absolute path**, not the raw input. Credential health is deliberately
+NOT checked at registration — the identity gate decides inclusion, the credential decides
+state, so a signed-out-but-valid config is a legitimate account.
+
+**Two review rounds' worth of findings, and a genuine two-reviewer severity split (Rule 7).**
+Codex rated six issues CRITICAL/MAJOR; the fresh reviewer rated the same code all-clear. Both
+were right about different *layers*: the reviewer verified the model layer correctly
+*implements* each behaviour (it traced `register()`, the launch prompt, the single-homed
+pref); codex found the *view* copies that authoritative state into local `@State` so the UI
+can go stale, and — the one that mattered — a concurrency defect the reviewer's happy-path
+trace missed.
+
+**Decision (the codex CRITICAL, re-severed to MAJOR and fixed): a location change during an
+in-flight survey was silently swallowed.** `survey()` opens `guard !isSurveying else
+return`, so a removal's `survey()` — fired while the timer's survey was already running —
+did nothing; the in-flight survey finished with the *stale* location set, the removed
+account was never reclaimed, and the `removeLocation` comment *falsely claimed* it was. Fixed
+with a `pendingResurvey` flag: a swallowed request is remembered and re-run once `isSurveying`
+clears (serialisation guarantees it runs strictly after, with the *current* location set), so
+a remove reclaims and a re-add re-discovers rather than waiting up to 60s. Re-severed from
+CRITICAL because state is identity-keyed (a different account at a re-registered location
+cannot inherit the old one's state) and it self-heals on the next tick — but the §6 contract
+and the lying comment both had to be fixed. **This fix lives in `Core/` (task 7's app-only
+shell), which the test target does not compile, so it is verified by typecheck + an
+interleaving trace read at commit, not by a unit test — the same boundary every `UsageStore`
+orchestration change has.**
+
+**Decision: the registered-location invariant lives at the store, not the caller.**
+`addLocation` now validates+normalizes internally and no-ops on rejection, so the store cannot
+persist a path the survey won't honour even if a caller skips the UI — the same "invariant at
+the owner" lesson as task 8's roster parameter.
+
+**A test that passed for the wrong reason, overturned.** The doer had marked the
+relative-path-rejection mutation an equivalent mutant ("caught downstream by is-directory").
+The reviewer proved it unsound: the real `SystemProfileFileSystem.isDirectory` resolves a
+relative path against the process CWD, so with the normalize guard removed a relative input
+*would* pass in production — the test only survived because the *fake* filesystem's
+dict-lookup never resolves CWD. Since a window-server-launched app has no defensible CWD,
+relative-path rejection is a task-4 *security* property. The test now rigs the fake so the
+relative path resolves to a valid directory and asserts it is still rejected; the mutation
+that was SURVIVED is now KILLED.
+
+**Freshness cluster (codex): the SettingsView re-reads authoritative state on `.onAppear`**
+rather than trusting `@State` snapshots — `SMAppService` login status, `notifier.isEnabled`,
+`store.registeredLocations` — so an external change (e.g. Open-at-Login toggled in System
+Settings) is reflected. Per-account checkboxes already read `@Published store.accounts` live.
+Chose onAppear re-read over making `AccountNotifier` observable — it is deliberately the
+impure shell.
+
+**Confirmed, not changed (reviewer over codex):** the launch-time accessibility prompt fires;
+the settings "Grant Accessibility" button opens System Settings rather than firing
+`AXIsProcessTrustedWithOptions`, which is correct — the with-options prompt is one-shot
+(macOS suppresses it after the first denial), so opening System Settings is the reliable
+recovery.
+
+**Artifact honesty:** the settings *panel* could not be screenshotted — a transient NSPopover
+of an accessory app is not drivable by synthesized System-Events clicks (it closes before
+`screencapture`) and `cliclick` is not installed. The menu bar was captured live on the new
+engine (Claude amber 75%, Codex green 6%, values moving across captures). Every SettingsView
+binding bug codex found is the class a settings screenshot would have shown in seconds — with
+the visual gate genuinely unavailable, the adversarial static review covered it. The settings
+logic is pure-tested and mutation-verified; the orchestration is typecheck-clean and trace-read.
+
+### For task 12
+
+Now-dead cookie-era UserDefaults keys are **left in place** (not this task's scope):
+`claude_session_cookie`, `has_cached_usage`, `cached_*`, `last_notified_threshold`,
+`has_set_notifications`. Version is still `1.3.2`; `build.sh`/`Info.plist`/signing untouched.
+Task 12 purges those keys, bumps to 2.0.0, and adds the loud signing fallback.
+
+**Touches:** new `Core/AppSettings.swift`, `UI/SettingsView.swift`. Deleted
+`Core/LegacyUsageManager.swift`, `Core/Notifier.swift`, `Core/Settings.swift`. Modified
+`App/AppDelegate.swift`, `UI/PopoverView.swift`, `UI/MenuBarController.swift`,
+`Core/UsageStore.swift` (registered-locations lifecycle + `pendingResurvey`),
+`Core/AccountNotifier.swift` (comment), `Credentials/ClaudeProfileDiscovery.swift`
+(`validateCandidate`), `Tests/ClaudeProfileDiscoveryTests.swift`. 924 checks. The app now runs
+entirely on the new engine; no legacy or inert leg remains.

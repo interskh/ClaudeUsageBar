@@ -251,6 +251,16 @@ struct ClaudeAccountIdentityFile: Equatable {
     }
 }
 
+// The outcome of validating a user-typed registered location (§4.1/§7.3). Two cases,
+// because the whole point is that a failure is REPORTED at add-time rather than the
+// location being accepted and silently ignored by the next survey. `accepted` carries the
+// normalized absolute path (so the store persists the canonical form the survey will key
+// on, not the raw `~`-relative string) and the durable label to echo back to the user.
+enum RegisteredLocationValidation: Equatable {
+    case accepted(normalizedPath: String, label: String)
+    case rejected(reason: String)
+}
+
 // A candidate directory that passed the identity gate, together with the service name
 // its credential lives under and the state that credential resolves to. Task 5 needs
 // the service name to re-read the credential on every fetch (§3), and task 7 needs it
@@ -549,6 +559,43 @@ struct ClaudeProfileDiscovery {
             return identity
         }
         return nil
+    }
+
+    // §4.1's registered-location escape hatch, validated AT REGISTRATION. A location that
+    // fails the identity gate must be reported as such the moment the user adds it — not
+    // accepted and then silently dropped by the next survey, which is indistinguishable
+    // from a bug ("I added my config and nothing showed up"). This runs the SAME gate the
+    // survey does (`normalize` → not-home → is-a-directory → `identityFile` carries an
+    // `oauthAccount` with at least one identifier), so a location this accepts is exactly a
+    // location the survey will resolve to an account. Credential HEALTH is deliberately not
+    // checked here: §4.1 makes the identity file decide inclusion and the credential decide
+    // STATE, so a validly-configured but signed-out profile is a legitimate account to
+    // track — it will simply render "Sign in via …". PURE: reuses the injected filesystem,
+    // so a passing and a failing candidate are both testable without touching the machine.
+    func validateCandidate(_ location: String) -> RegisteredLocationValidation {
+        guard let home = ClaudeProfileDiscovery.lexicallyStandardized(fileSystem.homeDirectoryPath) else {
+            return .rejected(reason: "Home directory could not be resolved.")
+        }
+        guard let normalized = ClaudeProfileDiscovery.normalize(location, home: home) else {
+            // Matches task 4's contract: a registered location is an absolute path; a
+            // relative one has no defensible base for a window-server-launched app.
+            return .rejected(reason: "Enter an absolute path (starting with / or ~).")
+        }
+        guard normalized != home else {
+            return .rejected(reason: "The home directory itself is not a profile.")
+        }
+        guard fileSystem.isDirectory(atPath: normalized) else {
+            return .rejected(reason: "No directory exists at this path.")
+        }
+        guard let identity = identityFile(for: normalized, home: home),
+              !identity.identityComponents.isEmpty else {
+            return .rejected(reason: "No Claude account is configured here "
+                             + "(\(ClaudeProfileDiscovery.identityFileName) has no oauthAccount).")
+        }
+        return .accepted(
+            normalizedPath: normalized,
+            label: ClaudeProfileDiscovery.label(forDirectory: normalized, home: home)
+        )
     }
 
     // The credential gate. It decides STATE, never inclusion (§4.1) — an account whose

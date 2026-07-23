@@ -70,16 +70,6 @@ extension AppDelegate {
         button.toolTip = segments.map { $0.tooltip }.joined(separator: "\n")
     }
 
-    // Inert shims for the cookie-era `LegacyUsageManager`, which is instantiated (the
-    // popover/settings still reference its type until task 11) but NEVER polls, so these
-    // are never called at runtime. They are no-ops rather than renderers so that even if
-    // the legacy manager were somehow driven, it could not fight the store for the button.
-    // Task 11 deletes these with their last call site.
-    // `nonisolated` so the (non-`@MainActor`) legacy manager's call sites still compile
-    // now that `AppDelegate` is `@MainActor`. Safe because the bodies touch nothing.
-    nonisolated func updateStatusIcon(percentage: Int) {}
-    nonisolated func updateStatusIcon(sessionPercentage: Int, weeklyPercentage: Int) {}
-
     private func providerIcon(for provider: ProviderKind, color: NSColor) -> NSImage {
         switch provider {
         case .anthropic: return createSparkIcon(color: color)
