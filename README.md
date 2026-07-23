@@ -91,7 +91,6 @@ One figure per provider — `⚡` is the worst of your Claude profiles, `◆` is
 
 ```
 app/        - macOS menu bar application (Swift/SwiftUI)
-website/    - Landing page (HTML/CSS)
 ```
 
 ## 🛠️ Build from Source
@@ -125,7 +124,6 @@ The built app will be in `app/build/ClaudeUsageBar.app`
 - `app/UI/` - Menu bar, popover, account cards, settings
 - `app/build.sh` - Build script
 - `app/create_dmg.sh` - DMG installer creation
-- `website/index.html` - Landing page
 
 ### Key Technologies
 
