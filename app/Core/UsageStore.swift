@@ -50,6 +50,7 @@ final class UsageStore: ObservableObject {
     private let engine: UsageEngine
     private let anthropic: AnthropicProvider
     private let codex: CodexProvider
+    private let cacheWriter = UsageCacheWriter()
     private var tickTimer: Timer?
     private var surveyTimer: Timer?
     private var isSurveying = false
@@ -317,6 +318,12 @@ final class UsageStore: ObservableObject {
         accounts = engine.presentations(now: now)
         menuBar = engine.menuBarFigures(now: now)
         lastSuccessAt = accounts.compactMap { $0.lastSuccessAt }.max()
+        do {
+            try cacheWriter.write(UsageCacheDocument(snapshots: engine.cachedSnapshots()))
+        } catch {
+            NSLog("⚠️ Could not update usage cache at %@: %@",
+                  cacheWriter.fileURL.path, error.localizedDescription)
+        }
     }
 
     // MARK: - Persistence

@@ -152,6 +152,7 @@ enum UsageEngineTests {
         cooldownSurvivesRelaunch()
         ledgerSurvivesRelaunchAndAccountRemoval()
         failureWithCacheRendersStale()
+        cacheExportUsesCurrentAccounts()
         horizonSuppressesAndExcludesFromWorstOf()
         menuBarAndCardAgreePastTheHorizon()
         futureDatedReadingsAreSuppressed()
@@ -168,6 +169,29 @@ enum UsageEngineTests {
         providerOrderIsHonoured()
         persistenceRoundTrip()
         cardExpansionPersistsAndReclaims()
+    }
+
+    static func cacheExportUsesCurrentAccounts() {
+        let clock = Clock()
+        let engine = UsageEngine(providerOrder: [.anthropic])
+        let original = ref(.anthropic, "cache-account", label: "Old label")
+        engine.ingest([observation(original, location: "svc")],
+                      covering: [.anthropic], now: clock.now)
+        clock.advance(PollSchedule.staggerSpan + 1)
+        let claimed = engine.claimDueFetches(now: clock.now)
+        complete(engine, claimed, original,
+                 fetched(original, [window(.session, percent: 42)], at: clock.now),
+                 now: clock.now)
+
+        let renamed = ref(.anthropic, "cache-account", label: "Current label")
+        engine.ingest([observation(renamed, location: "svc")],
+                      covering: [.anthropic], now: clock.now)
+        TestHarness.expect("cache export uses current account metadata",
+                           engine.cachedSnapshots().first?.account.label, "Current label")
+
+        engine.ingest([], covering: [.anthropic], now: clock.now)
+        TestHarness.check("cache export removes accounts that left discovery",
+                          engine.cachedSnapshots().isEmpty)
     }
 
     // §7.2/§6: card expansion is per-account state keyed on the DURABLE identity. It must

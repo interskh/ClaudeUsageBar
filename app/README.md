@@ -19,6 +19,7 @@ This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/Claude
 - ⌨️ **Keyboard Shortcut**: Toggle popup with Cmd+U from anywhere
 - 📊 **Model-Scoped Limits**: Per-model weekly bars appear automatically, as your plan reports them
 - 💳 **Extra Usage & Credits**: Pay-as-you-go spend and remaining free credits
+- 🔗 **JSON Cache**: Latest normalized readings for other local tools, with timestamps
 - 🎯 **Menu Bar Only**: No Dock icon, stays out of your way
 
 ## 🖼️ Screenshots
@@ -132,9 +133,8 @@ What follows from that:
 - ✅ **Credentials are read, never written** - the access token only ever goes to the
   provider that issued it
 - ✅ **What's stored locally** - your settings, the last good reading per account, and the
-  most recent raw usage response per account, kept for diagnostics. Those responses
-  contain account identifiers and plan details, so they live in the app's own container
-  and are discarded when an account goes away
+  normalized JSON cache described below. The most recent raw usage response per account
+  is retained only in memory for diagnostics and discarded when the app exits
 - ✅ **No hardcoded credentials** - accounts are discovered from what's already on disk
 - ✅ **Open source** - review the code yourself
 
@@ -146,6 +146,28 @@ What follows from that:
 3. Fetches usage from each provider's usage endpoint, per account
 4. Displays the worst-case figure per provider in your menu bar, with a card per account
 5. Sends per-account notifications when you cross a usage threshold
+
+## JSON Cache
+
+ClaudeUsageBar atomically maintains:
+
+```text
+~/Library/Application Support/ClaudeUsageBar/usage.json
+```
+
+The file is safe for another local tool to read while the app is updating it. Its
+top-level fields are:
+
+- `schema_version`: currently `1`
+- `last_updated`: ISO 8601 time of the newest successful pull, or `null` before any pull
+- `accounts`: latest normalized reading per discovered account
+
+Each account includes `provider`, stable `id`, display metadata, `fetched_at`, usage
+`windows`, optional spend data, and warnings. Each window includes its span, scope,
+percentage when known, reset time, and whether the provider marks it active. The cache
+contains no credentials or raw provider response. See
+[the full cache contract](../docs/json-cache.md) for the complete schema, location
+rationale, sandbox limitations, and reader examples.
 
 ## 🔨 Building & Distribution
 

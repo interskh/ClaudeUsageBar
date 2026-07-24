@@ -59,6 +59,7 @@ error, and it can never damage your session.
 - 🔒 **Read-only credentials** - Never writes, refreshes, or rotates a token
 - 📊 **Model-scoped limits** - Per-model weekly bars appear automatically, as your plan reports them
 - 💳 **Extra usage & credits** - Pay-as-you-go spend and remaining free credits
+- 🔗 **JSON cache** - Latest normalized readings for local tools, with update timestamps
 - 🎯 **Menu bar only** - No Dock icon, stays out of your way
 
 [See full feature list →](app/README.md)
@@ -86,6 +87,14 @@ One figure per provider — `⚡` is the worst of your Claude profiles, `◆` is
 - Extra usage spend and remaining free credits
 - Signed-out or expired accounts shown with a "sign in via the CLI" hint
 - Settings for per-account tracking, notifications and shortcuts
+
+## JSON Cache
+
+The app atomically maintains `~/Library/Application Support/ClaudeUsageBar/usage.json`.
+It contains the latest normalized reading for each account, a top-level `last_updated`
+timestamp for the newest successful pull, and a per-account `fetched_at` timestamp.
+See [the full cache contract](docs/json-cache.md) for location details, schema, and
+reader examples.
 
 ## 📁 Repository Structure
 

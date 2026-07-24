@@ -809,6 +809,20 @@ final class UsageEngine {
         runtimes[identity.storageKey].map { presentation(of: $0, now: now) }
     }
 
+    func cachedSnapshots() -> [Snapshot] {
+        sortedKeys().compactMap { key in
+            guard let runtime = runtimes[key], let snapshot = runtime.snapshot else { return nil }
+            return Snapshot(
+                account: runtime.ref,
+                planLabel: snapshot.planLabel,
+                windows: snapshot.windows,
+                spend: snapshot.spend,
+                fetchedAt: snapshot.fetchedAt,
+                warnings: snapshot.warnings
+            )
+        }
+    }
+
     private func sortedKeys() -> [String] {
         order.sorted { left, right in
             guard let a = runtimes[left], let b = runtimes[right] else { return left < right }
