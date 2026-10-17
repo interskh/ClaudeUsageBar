@@ -69,3 +69,11 @@
 - `.noAccessToken` has no cache drop on purpose: the gate returns `.absent` only with an empty cache (a matching email is a hit, a mismatch drops before reading).
 - Assumption: plain `lookupCredential(service:)` binds to nil and so DROPS the cache; no app caller uses it (the reader casts to `AccountBoundCredentialSource`, Claude discovery uses a raw `KeychainStore`). A footgun for a future caller.
 - `refresh(_ identity:)` (and its Muse arming) is unreachable from the UI today: only `store.refresh()` is called, from the popover button.
+
+## Whole-run gate, fix round 2 (orchestrator)
+
+**Decisions**: `read()` and `credentialMaterial()` now check for an email BEFORE the token source. An email-less oauth login can never be cached (the token is account-bound), so spending the user's one armed read on it was a prompt for nothing; the arm now survives for a keyable login. The email-less path also drops any cached token, like the other login-changed paths.
+**Rejected**: none.
+**Assumptions**: none new.
+**Deferred**: none.
+**Touches**: app/Credentials/MuseAuthReader.swift, app/Tests/MuseProviderTests.swift (one assertion in `cachedTokenIsBoundToItsAccount` now expects `.noDurableIdentity` for the email-less file, since that file no longer reaches the gate).

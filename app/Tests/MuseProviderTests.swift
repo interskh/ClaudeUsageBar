@@ -154,6 +154,26 @@ enum MuseProviderTests {
                            .noDurableIdentity)
     }
 
+    static func noEmailNeverSpendsAnArmedRead() {
+        let inner = keychainTokens()
+        let gate = gated(inner)
+        activate(gate)
+        let fs = world(auth: "auth-no-email.json")
+        TestHarness.expect("an email-less login is not keyable",
+                           reader(fs, gate).read(), .noDurableIdentity)
+        _ = reader(fs, gate).credentialMaterial()
+        TestHarness.check("an email-less login never spends the armed keychain read",
+                          inner.services.isEmpty)
+        TestHarness.check("the arm is still there for a keyable login", gate.isArmed)
+
+        let connected = gated(keychainTokens())
+        activate(connected)
+        _ = reader(world(), connected).read()
+        _ = reader(fs, connected).read()
+        TestHarness.expect("switching to an email-less login drops the cached token",
+                           reader(world(), connected).read(), .notConnected)
+    }
+
     static func missingKeychainItemIsSignedOutNotFailed() {
         let provider = MuseProvider(reader: reader(world(), FakeTokenSource()),
                                     http: FakeHTTP(), clock: { now })
@@ -470,8 +490,8 @@ enum MuseProviderTests {
         TestHarness.expect("and the cache is dropped, so the first account is not served either",
                            reader(world(), gate).read(), .notConnected)
         TestHarness.expect("no read happened for the new login", inner.services.count, 1)
-        TestHarness.expect("an email-less file is a cache miss",
-                           reader(world(auth: "auth-no-email.json"), gate).read(), .notConnected)
+        TestHarness.expect("an email-less file never gets the cached token",
+                           reader(world(auth: "auth-no-email.json"), gate).read(), .noDurableIdentity)
         let retry = gated(keychainTokens())
         activate(retry)
         TestHarness.expect("an email-less login has no durable identity",
@@ -634,6 +654,7 @@ enum MuseProviderTests {
         inlineTokenNeedsNoKeychain()
         apiKeyLoginIsNotAQuotaCredential()
         noEmailMeansNoDurableIdentity()
+        noEmailNeverSpendsAnArmedRead()
         keychainFaultPointsAtTheConnectInstruction()
         missingKeychainItemIsSignedOutNotFailed()
         noConfigDirectoryMeansNoAccount()

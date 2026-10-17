@@ -194,6 +194,12 @@ struct MuseAuthReader {
                                               fullName: fullName))
             }
         }
+        // Checked before the Keychain: a token with no email to bind it to can never be
+        // used, so spending the user's one prompt on it would be a prompt for nothing.
+        guard email != nil else {
+            forgetToken()
+            return .noDurableIdentity
+        }
         switch lookupToken(boundTo: email) {
         case .absent:
             return .noAccessToken
@@ -204,7 +210,6 @@ struct MuseAuthReader {
             guard let token = MuseAuthReader.token(inKeychainBlob: blob) else {
                 return .noAccessToken
             }
-            guard email != nil else { return .noDurableIdentity }
             return .usable(MuseCredential(accessToken: token,
                                           emailAddress: email,
                                           fullName: fullName))
@@ -228,7 +233,7 @@ struct MuseAuthReader {
         case .rejected(_, let file):
             return file
         case .oauth(let email, _, let inline, let file):
-            if inline != nil { return file }
+            if inline != nil || email == nil { return file }
             if case .found(let blob) = lookupToken(boundTo: email) {
                 return blob
             }
