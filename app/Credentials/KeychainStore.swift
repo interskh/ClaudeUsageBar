@@ -72,9 +72,14 @@ struct KeychainStore: ClaudeCredentialSource {
     static let maximumPayloadBytes = 1024 * 1024
 
     let account: String
+    // Per-instance so a read that waits on a deliberate user action can outlast the
+    // default: Muse's item prompts, and the dialog must survive the user typing their
+    // keychain password. Claude's silent reads keep the short watchdog.
+    let timeoutSeconds: Int
 
-    init(account: String = NSUserName()) {
+    init(account: String = NSUserName(), timeoutSeconds: Int = KeychainStore.timeoutSeconds) {
         self.account = account
+        self.timeoutSeconds = timeoutSeconds
     }
 
     // No caching, by construction: this type has no storage beyond the account name, so
@@ -131,11 +136,11 @@ struct KeychainStore: ClaudeCredentialSource {
         let handle = output.fileHandleForReading
         DispatchQueue.global(qos: .utility).async { collector.drain(handle) }
 
-        if exited.wait(timeout: .now() + .seconds(KeychainStore.timeoutSeconds)) == .timedOut {
+        if exited.wait(timeout: .now() + .seconds(timeoutSeconds)) == .timedOut {
             process.terminate()
             _ = exited.wait(timeout: .now() + .seconds(1))
             _ = collector.finish(timeout: 1)
-            return .failure(.timedOut(service: service, seconds: KeychainStore.timeoutSeconds))
+            return .failure(.timedOut(service: service, seconds: timeoutSeconds))
         }
         let drained = collector.finish(timeout: 2)
 

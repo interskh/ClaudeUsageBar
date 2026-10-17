@@ -189,26 +189,44 @@ struct MuseProvider: UsageProvider {
     func discoverAccounts() -> [DiscoveredAccount] {
         guard reader.isInstalled else { return [] }
         let read = reader.read()
-        return [DiscoveredAccount(ref: MuseProvider.reference(for: read),
+        return [DiscoveredAccount(ref: MuseProvider.reference(for: read,
+                                                              tokenlessEmail: reader.authIdentityEmail()),
                                   state: MuseProvider.state(for: read))]
     }
 
-    static func reference(for read: MuseAuthRead) -> AccountRef {
+    // `tokenlessEmail` is the auth file's email, used while the token is not available
+    // (not connected yet, or the Keychain read failed): the account keeps its identity —
+    // and the persisted state, enabled and expanded flags under it — rather than
+    // flipping to the shared sentinel and back as the token comes and goes.
+    static func reference(for read: MuseAuthRead, tokenlessEmail: String? = nil) -> AccountRef {
         switch read {
+        case .notConnected, .unreadable:
+            if let email = tokenlessEmail {
+                return AccountRef(
+                    id: AccountIdentity(provider: .muse, components: ["email:" + email]),
+                    label: accountLabel,
+                    subtitle: email
+                )
+            }
+            return sentinelReference
         case .usable(let credential):
             return AccountRef(
                 id: AccountIdentity(provider: .muse, components: credential.identityComponents),
                 label: accountLabel,
                 subtitle: credential.emailAddress
             )
-        case .fileMissing, .unsupportedMechanism, .noAccessToken, .noDurableIdentity, .unreadable:
-            // Shared sentinel, as with Codex: `fetch` fails for every one of these
-            // reads, so nothing is ever persisted under it.
-            return AccountRef(
-                id: AccountIdentity(provider: .muse, MuseCredential.unresolvedIdentityComponent),
-                label: accountLabel
-            )
+        case .fileMissing, .unsupportedMechanism, .noAccessToken, .noDurableIdentity:
+            return sentinelReference
         }
+    }
+
+    // Shared sentinel, as with Codex: `fetch` fails for every read that lands here, so
+    // nothing is ever persisted under it.
+    private static var sentinelReference: AccountRef {
+        AccountRef(
+            id: AccountIdentity(provider: .muse, MuseCredential.unresolvedIdentityComponent),
+            label: accountLabel
+        )
     }
 
     static func state(for read: MuseAuthRead) -> AccountState {
@@ -216,6 +234,7 @@ struct MuseProvider: UsageProvider {
         case .usable: return .pending
         case .fileMissing, .unsupportedMechanism, .noAccessToken: return .signedOut
         case .unreadable(let fault): return .failed(fault)
+        case .notConnected: return .failed(MuseAuthReader.connectInstruction)
         case .noDurableIdentity:
             return .failed("this Muse sign-in published no durable account identifier")
         }
@@ -236,6 +255,8 @@ struct MuseProvider: UsageProvider {
                 return .failure(.accountUnknown)
             case .unreadable(let fault):
                 return .failure(.transport(message: fault))
+            case .notConnected:
+                return .failure(.transport(message: MuseAuthReader.connectInstruction))
             }
         }
         guard MuseProvider.reference(for: read).id == account.id else {

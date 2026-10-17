@@ -64,6 +64,8 @@ final class UsageStore: ObservableObject {
     // in-flight survey clears, so the follow-up runs strictly AFTER it. No ABA token is
     // needed: `guard !isSurveying` already serialises surveys.
     private var pendingResurvey = false
+    // The Muse gate arm issued by a user Refresh, handed to the next survey that starts.
+    private var museArmTicket: MuseKeychainGate.ArmTicket?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -158,15 +160,33 @@ final class UsageStore: ObservableObject {
     // §6's manual Refresh. It bypasses the interval and NOTHING else: the same admission
     // gate applies, so the 60s floor and the credential budget still bind.
     func refresh() {
+        armMuseConnect()
         let now = Date()
         engine.requestManualRefresh(now: now)
         pump(now: now)
     }
 
     func refresh(_ identity: AccountIdentity) {
+        if identity.provider == .muse { armMuseConnect() }
         let now = Date()
         engine.requestManualRefresh(identity, now: now)
         pump(now: now)
+    }
+
+    // A user-initiated Refresh is the only thing that lets Muse's Keychain item be read
+    // (see `MuseKeychainGate`), and only for an enabled Muse account that is waiting to
+    // connect: nothing to arm when Muse is absent, inline, connected, or switched off.
+    // The unconnected account is not pollable — its discovery state is a failure — so the
+    // read happens in a survey. That survey owns the arm: it withdraws it at its end
+    // whether or not it reached the gate, then requests the fetch it unlocked.
+    private func armMuseConnect() {
+        let waiting = accounts.contains { account in
+            account.ref.id.provider == .muse && account.isEnabled
+                && MuseAuthReader.isWaitingToConnect(account.state)
+        }
+        guard waiting, let ticket = UsageStore.museGate.arm() else { return }
+        museArmTicket = ticket
+        survey()
     }
 
     func setEnabled(_ enabled: Bool, for identity: AccountIdentity) {
@@ -267,6 +287,12 @@ final class UsageStore: ObservableObject {
             guard let self else { return }
             let now = Date()
             self.engine.finish(task, result, now: now)
+            // A rejected Muse token is dropped and never re-read without the user: the
+            // survey that follows moves the card back to the connect state.
+            if task.ref.provider == .muse, case .failure(.authenticationRejected) = result {
+                UsageStore.museGate.invalidate()
+                self.survey()
+            }
             self.flush()
             self.publish(now: now)
             // An authentication rejection queues an immediate re-read and retry (§6);
@@ -296,6 +322,8 @@ final class UsageStore: ObservableObject {
         }
         lastSurveyStartedAt = now
         isSurveying = true
+        let armTicket = museArmTicket
+        museArmTicket = nil
         let locations = registeredLocations
         Task { [weak self] in
             let observations = await Task.detached(priority: .utility) {
@@ -307,6 +335,13 @@ final class UsageStore: ObservableObject {
             // Both providers ran, so both may reclaim: a Codex configuration that has
             // been removed yields no observation and its state is reclaimed (§6).
             self.engine.ingest(observations, covering: [.anthropic, .codex, .muse], now: now)
+            // An arm never outlives the user-initiated survey it was issued for.
+            UsageStore.museGate.endSurvey(armTicket)
+            if armTicket != nil {
+                for observation in observations where observation.account.ref.id.provider == .muse {
+                    self.engine.requestManualRefresh(observation.account.ref.id, now: now)
+                }
+            }
             self.flush()
             self.publish(now: now)
             self.pump(now: now)
@@ -365,9 +400,16 @@ final class UsageStore: ObservableObject {
         CodexAuthReader(fileSystem: SystemProfileFileSystem())
     }
 
+    // One gate for the process: its cached token and its arm must be shared by every
+    // reader, or each poll's fresh reader would start unarmed and uncached.
+    // The inner read waits on the macOS Keychain dialog, so its watchdog is long enough
+    // for the user to type their password; it runs in a survey or fetch, never on the
+    // main actor, and the gate keeps the main actor from waiting on it.
+    nonisolated static let museGate = MuseKeychainGate(
+        inner: KeychainStore(account: "meta", timeoutSeconds: 120))
+
     private nonisolated static func makeMuseReader() -> MuseAuthReader {
-        MuseAuthReader(fileSystem: SystemProfileFileSystem(),
-                       tokens: KeychainStore(account: "meta"))
+        MuseAuthReader(fileSystem: SystemProfileFileSystem(), tokens: museGate)
     }
 
     nonisolated static func collectObservations(registeredLocations: [String],
@@ -450,17 +492,12 @@ final class UsageStore: ObservableObject {
         return CredentialFact(digest: ClaudeCredential.credentialDigest(data))
     }
 
-    // Muse's token lives in the Keychain, so the digest is taken over the Keychain
-    // payload when one is readable; the auth file is the fallback. No expiry is
-    // published, so `expiresAt` stays nil — as with Codex, upstream decides.
+    // An inline token digests the auth file and never touches the Keychain; otherwise the
+    // digest is taken over the gated Keychain token, with the auth file as the fallback.
+    // No expiry is published, so `expiresAt` stays nil — as with Codex, upstream decides.
     private nonisolated static func museCredentialFact(reader: MuseAuthReader) -> CredentialFact {
-        if case .found(let blob) = reader.tokens.lookupCredential(service: MuseAuthReader.keychainService) {
-            return CredentialFact(digest: ClaudeCredential.credentialDigest(blob))
-        }
-        guard let path = reader.authPath,
-              case .contents(let data) = reader.fileSystem.readFile(atPath: path)
-        else { return CredentialFact() }
-        return CredentialFact(digest: ClaudeCredential.credentialDigest(data))
+        guard let material = reader.credentialMaterial() else { return CredentialFact() }
+        return CredentialFact(digest: ClaudeCredential.credentialDigest(material))
     }
 
     // Re-reads ONE account's credential, now. Used only by the engine's second-rejection
