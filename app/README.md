@@ -201,6 +201,12 @@ rm -rf build
   directory, register its directory in Settings — it is not found otherwise
 - Discovery re-runs periodically and when you open the popup
 
+### macOS keeps asking "security wants to access key ai.meta.dev.credentials"
+- The Muse CLI locks its Keychain item to Meta-signed apps; *Always Allow* does not stick
+- Run once in Terminal (asks for your login keychain password):
+  `security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta`
+- Re-run it after `muse logout` / `muse login`; undo with `-S "teamid:V9WTTPBFK9"`
+
 ### An account shows "Signed out" or "Expired"
 - Sign in again with that CLI; the app can't renew a credential itself
 - It picks the new credential up automatically once the CLI has written it

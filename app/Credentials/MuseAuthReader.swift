@@ -57,6 +57,9 @@ struct MuseAuthReader {
     static let keychainService = "ai.meta.dev.credentials"
     static let requiredMechanism = "oauth"
     static let maximumCredentialBytes = 4 * 1024 * 1024
+    // The CLI's item is partitioned to Meta's team ID, so the Apple tool `KeychainStore`
+    // shells out to prompts on every read until the user adds `apple-tool:` once (README).
+    static let keychainGrantHint = "if macOS keeps asking, run the one-time Muse Keychain grant in the README"
 
     let fileSystem: ProfileFileSystem
     let tokens: ClaudeCredentialSource
@@ -141,7 +144,7 @@ struct MuseAuthReader {
         case .absent:
             return .noAccessToken
         case .failed(let fault):
-            return .unreadable(fault)
+            return .unreadable(fault + "; " + MuseAuthReader.keychainGrantHint)
         case .found(let blob):
             guard let token = MuseAuthReader.token(inKeychainBlob: blob) else {
                 return .noAccessToken

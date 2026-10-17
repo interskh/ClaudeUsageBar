@@ -32,6 +32,14 @@ That's it. The app finds the credentials those CLIs already stored, picks up you
 
 Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and whatever configuration directory your environment designates; a profile kept anywhere else is added by registering its directory in Settings. Codex honours `$CODEX_HOME`, falling back to `~/.codex`. Muse reads `~/.config/muse/auth.json` (or `$MUSE_AUTH_PATH`) plus the token the Muse CLI keeps in your Keychain.
 
+**Muse: one-time Keychain grant.** The Muse CLI locks its Keychain item to Meta-signed apps, so macOS asks *"security wants to access key ai.meta.dev.credentials"* on every refresh — and *Always Allow* does not stick. Run this once in Terminal (it asks for your login keychain password):
+
+```bash
+security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta
+```
+
+It lets Apple's own `security` tool read the item silently, as it already does for Claude Code; the Muse CLI keeps its access. Re-run it after `muse logout` / `muse login`, which recreate the item. To undo, run the same command with `-S "teamid:V9WTTPBFK9"`.
+
 If no account is found, the popover tells you to sign in with Claude Code or the Codex CLI — it never asks you to paste a credential.
 
 ## 🔒 Read-only, always

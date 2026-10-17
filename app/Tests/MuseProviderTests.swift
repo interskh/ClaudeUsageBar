@@ -133,6 +133,19 @@ enum MuseProviderTests {
                            .unsupportedMechanism)
     }
 
+    static func keychainFaultPointsAtTheOneTimeGrant() {
+        let tokens = FakeTokenSource()
+        let fault = "keychain read for service \(MuseAuthReader.keychainService) timed out after 5s"
+        tokens.lookup = .failed(fault)
+        guard case .unreadable(let message) = reader(world(), tokens).read() else {
+            TestHarness.check("a keychain fault is unreadable", false)
+            return
+        }
+        TestHarness.check("the keychain fault is kept", message.contains(fault))
+        TestHarness.check("the fault points at the one-time Keychain grant",
+                          message.contains(MuseAuthReader.keychainGrantHint))
+    }
+
     static func noEmailMeansNoDurableIdentity() {
         TestHarness.expect("a token with no email cannot be keyed",
                            reader(world(auth: "auth-no-email.json"), keychainTokens()).read(),
@@ -304,6 +317,7 @@ enum MuseProviderTests {
         inlineTokenNeedsNoKeychain()
         apiKeyLoginIsNotAQuotaCredential()
         noEmailMeansNoDurableIdentity()
+        keychainFaultPointsAtTheOneTimeGrant()
         missingKeychainItemIsSignedOutNotFailed()
         noConfigDirectoryMeansNoAccount()
         liveShapeProjectsTwoWindowsAndThePlan()
