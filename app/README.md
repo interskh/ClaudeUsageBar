@@ -77,7 +77,8 @@ tracking. Nothing to paste, no key to enter.
 - **Codex**: the account the Codex CLI is signed in to, from `$CODEX_HOME` when that is
   set, otherwise `~/.codex`.
 - **Muse**: the account Muse is signed in to, from `~/.config/muse/auth.json`
-  (or `$MUSE_AUTH_PATH`) plus the device token the CLI keeps in your Keychain. Muse
+  (or `$MUSE_AUTH_PATH`) plus the device token the CLI keeps in your Keychain (or inline in
+  that file). The app reads the Keychain only when you click Refresh on the Muse card. Muse
   publishes no GET usage endpoint, so the app makes the same startup key call the CLI
   makes and reads the subscription block from its response; the minted key in that
   response is discarded, never stored.
@@ -201,13 +202,26 @@ rm -rf build
   directory, register its directory in Settings — it is not found otherwise
 - Discovery re-runs periodically and when you open the popup
 
-### macOS keeps asking "security wants to access key ai.meta.dev.credentials"
-- The Muse CLI locks its Keychain item to Meta-signed apps; *Always Allow* does not stick
-- Run once in Terminal (asks for your login keychain password):
-  `security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta ~/Library/Keychains/login.keychain-db`
-- Check it took: `security dump-keychain -a ~/Library/Keychains/login.keychain-db | grep -c 'apple-tool:, teamid:V9WTTPBFK9'`
-  prints `1`; if it prints `0`, the password was not accepted — run the grant again
-- Re-run it after `muse logout` / `muse login`; undo with `-S "teamid:V9WTTPBFK9"`
+### Muse card says "Click Refresh to connect Muse"
+- Muse keeps its token in the Keychain, and the app never reads it in the background
+- Click Refresh on the card; macOS shows one prompt and asks for your login keychain password
+- The token is then held in memory only, for the app's lifetime, and is never written anywhere
+- The card asks again after a relaunch, or after Muse rejects the token (401/403)
+- *Always Allow* does not stick: Muse rewrites its Keychain item whenever it launches or
+  refreshes, which resets the item's access list
+
+### Avoiding the Muse Keychain prompt (file backend)
+- Add `export TBH_CREDENTIAL_BACKEND=file` to `~/.zshenv`, then in a new terminal run
+  `muse logout && muse login`
+- Muse then keeps the token inline in `~/.config/muse/auth.json` (mode 0600); the app reads it
+  there and never touches the Keychain
+- Check it worked: `grep -c '"storage"' ~/.config/muse/auth.json` prints `0` (it does not print the token)
+- Caveats: it is an internal, undocumented switch that a Muse update may change or remove;
+  the token (and the inference key Muse mints) sit in plain text on disk; every `muse`
+  launch needs the variable, and one started without it (for example from a GUI app) goes
+  back to the Keychain
+- With the file backend, `muse logout` does not remove an old Keychain item; that is
+  harmless, because the app ignores it when `auth.json` has an inline token
 
 ### An account shows "Signed out" or "Expired"
 - Sign in again with that CLI; the app can't renew a credential itself

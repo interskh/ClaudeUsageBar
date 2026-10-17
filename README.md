@@ -30,17 +30,22 @@ The universal binary lands in `app/build/ClaudeUsageBar.app`; drag it to Applica
 
 That's it. The app finds the credentials those CLIs already stored, picks up your Claude profiles in the usual locations plus your Codex account, and starts tracking them. There is nothing to paste and no key to enter.
 
-Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and whatever configuration directory your environment designates; a profile kept anywhere else is added by registering its directory in Settings. Codex honours `$CODEX_HOME`, falling back to `~/.codex`. Muse reads `~/.config/muse/auth.json` (or `$MUSE_AUTH_PATH`) plus the token the Muse CLI keeps in your Keychain.
+Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and whatever configuration directory your environment designates; a profile kept anywhere else is added by registering its directory in Settings. Codex honours `$CODEX_HOME`, falling back to `~/.codex`. Muse reads `~/.config/muse/auth.json` (or `$MUSE_AUTH_PATH`) plus the token the Muse CLI keeps in your Keychain (or inline in that file, see below).
 
-**Muse: one-time Keychain grant.** The Muse CLI locks its Keychain item to Meta-signed apps, so macOS asks *"security wants to access key ai.meta.dev.credentials"* on every refresh — and *Always Allow* does not stick. Run this once in Terminal (it asks for your login keychain password):
+**Muse: click to connect.** When Muse keeps its token in the Keychain, the app never reads it in the background. The Muse card says *"Click Refresh to connect Muse — macOS will ask for Keychain access"*. Click Refresh and macOS shows one prompt (it asks for your login keychain password). The token is then held in memory only, for as long as the app runs, and is never written anywhere. After a relaunch, or after Muse rejects the token (401/403), the card asks again. *Always Allow* does not stick: Muse rewrites its Keychain item whenever it launches or refreshes, which resets the item's access list.
+
+**Muse: no prompts at all (file backend).** Add this to `~/.zshenv`, then in a new terminal run `muse logout && muse login`:
 
 ```bash
-security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta ~/Library/Keychains/login.keychain-db
+export TBH_CREDENTIAL_BACKEND=file
 ```
 
-Check it took: `security dump-keychain -a ~/Library/Keychains/login.keychain-db | grep -c 'apple-tool:, teamid:V9WTTPBFK9'` prints `1`. If it prints `0`, the password was not accepted — run the command again.
+Muse then keeps the token inline in `~/.config/muse/auth.json` (mode 0600), and the app reads it there without touching the Keychain. Check it worked: `grep -c '"storage"' ~/.config/muse/auth.json` prints `0` (it does not print the token). Caveats:
 
-It lets Apple's own `security` tool read the item silently, as it already does for Claude Code; the Muse CLI keeps its access. Re-run it after `muse logout` / `muse login`, which recreate the item. To undo, run the same command with `-S "teamid:V9WTTPBFK9"`.
+- It is an internal, undocumented Muse switch; a Muse update may change or remove it.
+- The token (and the inference key Muse mints) sit in plain text on disk.
+- Every `muse` launch needs the variable. One started without it (for example from a GUI app) goes back to the Keychain.
+- With the file backend, `muse logout` does not remove an old Keychain item. That is harmless: the app ignores it when `auth.json` has an inline token.
 
 If no account is found, the popover tells you to sign in with Claude Code or the Codex CLI — it never asks you to paste a credential.
 

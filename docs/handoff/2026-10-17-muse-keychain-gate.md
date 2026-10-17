@@ -41,3 +41,11 @@
 - Re-arm predicate is `MuseAuthReader.isWaitingToConnect` (suffix match) so a denied/timed-out card (`fault; instruction`) still arms on Refresh.
 - `.noAccessToken` (armed read -> item absent) keeps the sentinel identity (signed out); deliberate, since signed-out has no state worth keeping. Same-session churn email->sentinel->email is possible there; rare.
 - Assumption: the engine's second-rejection `credentialProbe` -> `museCredentialFact` runs on the main actor and could wait on `reads`. Believed unreachable while a read is in flight: after the first 401 `invalidate()` makes the retry a transport failure, resetting `authRejections`, so two consecutive rejections cannot occur with an uncached gate.
+
+## Task 2 — README docs (orchestrator entry)
+
+**Decisions**: Replaced the one-time partition-list grant in both READMEs: Muse rewrites its Keychain item on launch/refresh and the rewrite resets the partition list (observed 2026-10-17: grant applied, undone by Muse's next write). Documented click-to-connect (commit 044fc15) and the file backend (`TBH_CREDENTIAL_BACKEND=file` in `~/.zshenv`, then `muse logout && muse login`) as the zero-prompt path, verified on the target machine: `auth.json` gained an inline token and lost `storage: keychain`.
+**Rejected**: Keeping the grant as a documented workaround — it does not survive the next Muse launch.
+**Assumptions**: `TBH_CREDENTIAL_BACKEND` is internal and undocumented; the docs say so.
+**Deferred**: none.
+**Touches**: README.md, app/README.md.
