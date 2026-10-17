@@ -114,6 +114,19 @@ struct MuseAuthReader {
         return fileSystem.isDirectory(atPath: configDirectoryPath)
     }
 
+    // A source that binds its cached token to an identity gets the auth file's email, so
+    // a token read for one login is never served for another.
+    private func lookupToken(boundTo email: String?) -> CredentialLookup {
+        if let bound = tokens as? AccountBoundCredentialSource {
+            return bound.lookupCredential(service: MuseAuthReader.keychainService, boundTo: email)
+        }
+        return tokens.lookupCredential(service: MuseAuthReader.keychainService)
+    }
+
+    private func forgetToken() {
+        (tokens as? AccountBoundCredentialSource)?.invalidate()
+    }
+
     // Whether a card is waiting for the user to connect: the bare instruction, or a
     // denied/timed-out read that ends with it. Both mean a Refresh click should arm.
     static func isWaitingToConnect(_ state: AccountState) -> Bool {
@@ -165,19 +178,23 @@ struct MuseAuthReader {
         let fullName: String?
         switch parseAuthFile() {
         case .rejected(let read, _):
+            // Signed out or on another mechanism: whatever was cached belongs to a login
+            // that no longer exists.
+            if read == .fileMissing || read == .unsupportedMechanism { forgetToken() }
             return read
         case .oauth(let parsedEmail, let parsedName, let inline, _):
             email = parsedEmail
             fullName = parsedName
             // Inline token (non-Keychain storage), else the CLI's Keychain item.
             if let inline {
+                forgetToken()
                 guard email != nil else { return .noDurableIdentity }
                 return .usable(MuseCredential(accessToken: inline,
                                               emailAddress: email,
                                               fullName: fullName))
             }
         }
-        switch tokens.lookupCredential(service: MuseAuthReader.keychainService) {
+        switch lookupToken(boundTo: email) {
         case .absent:
             return .noAccessToken
         case .failed(let fault):
@@ -210,9 +227,9 @@ struct MuseAuthReader {
         switch parseAuthFile() {
         case .rejected(_, let file):
             return file
-        case .oauth(_, _, let inline, let file):
+        case .oauth(let email, _, let inline, let file):
             if inline != nil { return file }
-            if case .found(let blob) = tokens.lookupCredential(service: MuseAuthReader.keychainService) {
+            if case .found(let blob) = lookupToken(boundTo: email) {
                 return blob
             }
             return file

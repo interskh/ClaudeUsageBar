@@ -4,10 +4,10 @@
 - `MuseKeychainGate` (pure, app/Credentials): token cache + one-shot arm; lock held across the inner read; caches only `access_token`, serves a synthesized `{access_token}` blob.
 - Not-connected = gate returns `.failed(MuseAuthReader.connectInstruction)`; reader maps that exact fault to new `MuseAuthRead.notConnected` (state `.failed(msg)`, fetch `.transport(msg)`); other faults get `"; " + connectInstruction`.
 - `arm()` is a no-op (returns false) while a token is cached, so a stale arm cannot let a later background poll prompt after invalidation.
-- Engine only polls `.pending` accounts (`credentialUsable`), so a not-connected account cannot be fetched by a manual refresh. Wiring: `armMuseConnect()` arms + runs a survey (discovery does the one read); the survey's completion requests a manual refresh for Muse observations once `!gate.isArmed` (`museConnectPending` flag).
+- Engine only polls `.pending` accounts (`credentialUsable`), so a not-connected account cannot be fetched by a manual refresh. Wiring: `armMuseConnect()` arms + runs a survey (discovery does the one read); the survey's completion requests a manual refresh for Muse observations once `!gate.isArmed` (`museConnectPending` flag). [SUPERSEDED by the review fix round: the flag and `!gate.isArmed` test were replaced by arm tickets.]
 - 401/403 on Muse: `invalidate()` + `survey()` so discoveryState flips to the connect failure (outranks cached reading).
 - Inline-first: `MuseAuthReader.credentialMaterial()` / `hasInlineToken` (pure); `museCredentialFact` uses it.
-- Connect-state ref is the shared "unresolved" sentinel; after connecting, the real-email identity is a new engine key (staggered-first-poll avoided by the manual refresh above).
+- [SUPERSEDED by the fix round: the connect state now keys on the auth file's email] Connect-state ref is the shared "unresolved" sentinel; after connecting, the real-email identity is a new engine key (staggered-first-poll avoided by the manual refresh above).
 
 **Rejected**
 - Distinct sentinel type/new lookup case on `CredentialLookup`: touches shared Claude/Codex code; string-constant match is local.
@@ -49,3 +49,23 @@
 **Assumptions**: `TBH_CREDENTIAL_BACKEND` is internal and undocumented; the docs say so.
 **Deferred**: none.
 **Touches**: README.md, app/README.md.
+
+## Task 1 — whole-run gate fix round
+
+**Decisions**
+- Account binding: the gate caches `(token, email)`; `lookupCredential(service:boundTo:)` (protocol `AccountBoundCredentialSource`) misses and drops the cache for another/nil email. `MuseAuthReader` passes the auth file's email and calls `invalidate()` on fileMissing / unsupportedMechanism / inline token. Plain `lookupCredential(service:)` binds to nil (never a hit).
+- Arm activation: `arm()` records a pending ticket only; `beginSurvey(ticket)` (called by `survey()` as it starts) activates it; lookups consume only an activated arm; `endSurvey` clears pending and active. A survey that did not start with the ticket can never spend it.
+- `UsageStore` invalidates on a Muse 401/403 only when `engine.finish` accepted the result.
+- Docs: no per-card Refresh exists (only the popover-wide button, PopoverView); both READMEs now say so, describe the real token lifetime (quit, rejection, sign-out, account change) and that a Keychain-backed Muse needs a Refresh click to reconnect while the file backend resumes alone.
+
+**Accepted trade-off**: an armed read can keep the survey busy for up to 120s while the dialog is open, so Claude/Codex discovery and location add/remove wait (they queue via `pendingResurvey`).
+
+**Rejected**
+- Inline-token 401 entering the connect state: no Keychain involved; the engine's existing rejection handling applies, as for Codex.
+- Dropping the token on an HTTP usage-request timeout: the contract's "timeout" is the Keychain read timeout.
+- Setting the expected email on the gate before each lookup (stateful, racy) in favour of passing it per call.
+
+**Touches**: Credentials/MuseKeychainGate.swift, MuseAuthReader.swift, Core/UsageStore.swift, Tests/MuseProviderTests.swift, README.md, app/README.md.
+- `.noAccessToken` has no cache drop on purpose: the gate returns `.absent` only with an empty cache (a matching email is a hit, a mismatch drops before reading).
+- Assumption: plain `lookupCredential(service:)` binds to nil and so DROPS the cache; no app caller uses it (the reader casts to `AccountBoundCredentialSource`, Claude discovery uses a raw `KeychainStore`). A footgun for a future caller.
+- `refresh(_ identity:)` (and its Muse arming) is unreachable from the UI today: only `store.refresh()` is called, from the popover button.

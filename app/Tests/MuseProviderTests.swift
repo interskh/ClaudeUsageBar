@@ -243,6 +243,17 @@ enum MuseProviderTests {
 
     // MARK: - Keychain gate
 
+    private static let email = "user@example.com"
+
+    // What the shell does for a user Refresh: record the arm, then let the owning survey
+    // activate it as it starts.
+    @discardableResult
+    private static func activate(_ gate: MuseKeychainGate) -> MuseKeychainGate.ArmTicket? {
+        let ticket = gate.arm()
+        gate.beginSurvey(ticket)
+        return ticket
+    }
+
     private static func gated(_ inner: FakeTokenSource) -> MuseKeychainGate {
         MuseKeychainGate(inner: inner)
     }
@@ -280,7 +291,7 @@ enum MuseProviderTests {
     static func armedGateReadsOnceThenServesTheCache() {
         let inner = keychainTokens()
         let gate = gated(inner)
-        TestHarness.check("arming an empty gate reports it", gate.arm() != nil)
+        TestHarness.check("arming an empty gate reports it", activate(gate) != nil)
         guard case .usable(let first) = reader(world(), gate).read() else {
             TestHarness.check("an armed read is usable", false)
             return
@@ -297,12 +308,12 @@ enum MuseProviderTests {
         let inner = keychainTokens()
         inner.delay = 0.05
         let gate = gated(inner)
-        gate.arm()
+        activate(gate)
         let found = Box<Int>()
         found.value = 0
         let tally = NSLock()
         DispatchQueue.concurrentPerform(iterations: 8) { _ in
-            if case .found = gate.lookupCredential(service: MuseAuthReader.keychainService) {
+            if case .found = gate.lookupCredential(service: MuseAuthReader.keychainService, boundTo: email) {
                 tally.lock()
                 found.value = (found.value ?? 0) + 1
                 tally.unlock()
@@ -314,9 +325,9 @@ enum MuseProviderTests {
 
     static func cachedBlobCarriesOnlyTheAccessToken() {
         let gate = gated(keychainTokens())
-        gate.arm()
+        activate(gate)
         for round in ["armed", "cached"] {
-            guard case .found(let blob) = gate.lookupCredential(service: MuseAuthReader.keychainService),
+            guard case .found(let blob) = gate.lookupCredential(service: MuseAuthReader.keychainService, boundTo: email),
                   let object = (try? JSONSerialization.jsonObject(with: blob)) as? [String: Any]
             else {
                 TestHarness.check("\(round) lookup returns a blob", false)
@@ -336,7 +347,7 @@ enum MuseProviderTests {
         let fault = "keychain read for service \(MuseAuthReader.keychainService) timed out after 5s"
         inner.lookup = .failed(fault)
         let gate = gated(inner)
-        gate.arm()
+        activate(gate)
         let state = cardState(world(), gate)
         TestHarness.check("the card shows the fault and the connect instruction",
                           isFailed(state, fault + "; " + MuseAuthReader.connectInstruction))
@@ -357,7 +368,7 @@ enum MuseProviderTests {
     static func absentItemIsSignedOutAndNotCached() {
         let inner = FakeTokenSource()
         let gate = gated(inner)
-        gate.arm()
+        activate(gate)
         guard case .signedOut? = cardState(world(), gate) else {
             TestHarness.check("an absent item reads as signed out", false)
             return
@@ -371,7 +382,7 @@ enum MuseProviderTests {
     static func invalidateReturnsToTheConnectState() {
         let inner = keychainTokens()
         let gate = gated(inner)
-        gate.arm()
+        activate(gate)
         _ = reader(world(), gate).read()
         gate.invalidate()
         TestHarness.check("the card asks to connect again",
@@ -399,7 +410,8 @@ enum MuseProviderTests {
     static func surveyThatNeverReachesTheGateWithdrawsItsArm() {
         let inner = keychainTokens()
         let gate = gated(inner)
-        let ticket = gate.arm()
+        let ticket = activate(gate)
+        TestHarness.check("a begun survey activates the arm", gate.isArmed)
         gate.endSurvey(ticket)
         TestHarness.check("the survey's end withdraws the arm", !gate.isArmed)
         TestHarness.expect("a later background lookup is not connected",
@@ -408,21 +420,91 @@ enum MuseProviderTests {
 
         let older = gate.arm()
         let newer = gate.arm()
+        gate.beginSurvey(older)
+        TestHarness.check("a superseded ticket activates nothing", !gate.isArmed)
+        gate.beginSurvey(newer)
         gate.endSurvey(older)
-        TestHarness.check("a click during a survey survives that survey's end", gate.isArmed)
+        TestHarness.check("a stale survey's end does not withdraw the newer arm", gate.isArmed)
         gate.endSurvey(newer)
         TestHarness.check("the newer arm is withdrawn by its own survey", !gate.isArmed)
         gate.endSurvey(nil)
+    }
+
+    static func pendingArmIsOnlyConsumedByItsOwnSurvey() {
+        let inner = FakeTokenSource()
+        let fault = "keychain read for service \(MuseAuthReader.keychainService) timed out after 5s"
+        inner.lookup = .failed(fault)
+        let gate = gated(inner)
+        let ticket = gate.arm()
+        TestHarness.expect("a survey that did not start with the ticket reads nothing",
+                           reader(world(), gate).read(), .notConnected)
+        TestHarness.check("so the pending arm is untouched by it", inner.services.isEmpty)
+        gate.beginSurvey(ticket)
+        guard case .unreadable(let message) = reader(world(), gate).read() else {
+            TestHarness.check("the owning survey reads under the arm", false)
+            return
+        }
+        TestHarness.check("the denial message is kept", message.hasPrefix(fault))
+        TestHarness.expect("the arm is consumed exactly once", inner.services.count, 1)
+        _ = reader(world(), gate).read()
+        TestHarness.expect("a second lookup in the same survey does not read again",
+                           inner.services.count, 1)
+        gate.endSurvey(ticket)
+        TestHarness.check("ending the consumed survey is harmless", !gate.isArmed)
+    }
+
+    static func cachedTokenIsBoundToItsAccount() {
+        let inner = keychainTokens()
+        let gate = gated(inner)
+        activate(gate)
+        TestHarness.check("the owner account connects", {
+            if case .usable = reader(world(), gate).read() { return true }
+            return false
+        }())
+        let other = FakeFileSystem(homeDirectoryPath: home)
+        other.directories = [home, configDirectory]
+        other.files[authPath] = Data(String(decoding: fixture("auth-keychain.json"), as: UTF8.self)
+            .replacingOccurrences(of: "user@example.com", with: "other@example.com").utf8)
+        TestHarness.expect("a different login never gets the cached token",
+                           reader(other, gate).read(), .notConnected)
+        TestHarness.expect("and the cache is dropped, so the first account is not served either",
+                           reader(world(), gate).read(), .notConnected)
+        TestHarness.expect("no read happened for the new login", inner.services.count, 1)
+        TestHarness.expect("an email-less file is a cache miss",
+                           reader(world(auth: "auth-no-email.json"), gate).read(), .notConnected)
+        let retry = gated(keychainTokens())
+        activate(retry)
+        TestHarness.expect("an email-less login has no durable identity",
+                           reader(world(auth: "auth-no-email.json"), retry).read(), .noDurableIdentity)
+        TestHarness.check("and its token is not cached, so the user can retry", retry.arm() != nil)
+    }
+
+    static func signedOutStatesDropTheCachedToken() {
+        func connected() -> (MuseKeychainGate, FakeTokenSource) {
+            let inner = keychainTokens()
+            let gate = gated(inner)
+            activate(gate)
+            _ = reader(world(), gate).read()
+            return (gate, inner)
+        }
+        for (name, fs) in [("missing auth file", world(auth: nil)),
+                           ("api-key login", world(auth: "auth-api-key.json")),
+                           ("inline token", world(auth: "auth-inline.json"))] {
+            let (gate, _) = connected()
+            _ = reader(fs, gate).read()
+            TestHarness.expect("\(name) drops the cache",
+                               reader(world(), gate).read(), .notConnected)
+        }
     }
 
     static func invalidateDuringAReadWinsAndNeverBlocks() {
         let inner = keychainTokens()
         inner.delay = 0.3
         let gate = gated(inner)
-        gate.arm()
+        activate(gate)
         let reading = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            _ = gate.lookupCredential(service: MuseAuthReader.keychainService)
+            _ = gate.lookupCredential(service: MuseAuthReader.keychainService, boundTo: email)
             reading.signal()
         }
         Thread.sleep(forTimeInterval: 0.05)
@@ -448,7 +530,7 @@ enum MuseProviderTests {
         TestHarness.expect("the not-connected card keys on the email",
                            account.ref.id.storageKey,
                            AccountIdentity(provider: .muse, components: ["email:user@example.com"]).storageKey)
-        gate.arm()
+        activate(gate)
         TestHarness.expect("connecting keeps the same identity",
                            discoveredRef(fs, gate).id.storageKey, account.ref.id.storageKey)
         TestHarness.expect("an email-less file stays on the sentinel",
@@ -573,6 +655,9 @@ enum MuseProviderTests {
         invalidateReturnsToTheConnectState()
         inlineTokenNeverTouchesTheTokenSource()
         surveyThatNeverReachesTheGateWithdrawsItsArm()
+        pendingArmIsOnlyConsumedByItsOwnSurvey()
+        cachedTokenIsBoundToItsAccount()
+        signedOutStatesDropTheCachedToken()
         invalidateDuringAReadWinsAndNeverBlocks()
         notConnectedKeepsTheEmailIdentity()
         materialSkipsTheTokenSourceWhenReadWould()

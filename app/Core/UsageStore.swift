@@ -286,10 +286,12 @@ final class UsageStore: ObservableObject {
             let result = await provider.fetch(task.ref)
             guard let self else { return }
             let now = Date()
-            self.engine.finish(task, result, now: now)
+            let accepted = self.engine.finish(task, result, now: now)
             // A rejected Muse token is dropped and never re-read without the user: the
-            // survey that follows moves the card back to the connect state.
-            if task.ref.provider == .muse, case .failure(.authenticationRejected) = result {
+            // survey that follows moves the card back to the connect state. A result the
+            // engine disowned (superseded task, disabled account) says nothing about the
+            // current token.
+            if accepted, task.ref.provider == .muse, case .failure(.authenticationRejected) = result {
                 UsageStore.museGate.invalidate()
                 self.survey()
             }
@@ -324,6 +326,7 @@ final class UsageStore: ObservableObject {
         isSurveying = true
         let armTicket = museArmTicket
         museArmTicket = nil
+        UsageStore.museGate.beginSurvey(armTicket)
         let locations = registeredLocations
         Task { [weak self] in
             let observations = await Task.detached(priority: .utility) {

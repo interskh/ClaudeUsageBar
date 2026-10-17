@@ -78,7 +78,7 @@ tracking. Nothing to paste, no key to enter.
   set, otherwise `~/.codex`.
 - **Muse**: the account Muse is signed in to, from `~/.config/muse/auth.json`
   (or `$MUSE_AUTH_PATH`) plus the device token the CLI keeps in your Keychain (or inline in
-  that file). The app reads the Keychain only when you click Refresh on the Muse card. Muse
+  that file). The app reads the Keychain only when you click the popover's Refresh button while the Muse card asks to connect. Muse
   publishes no GET usage endpoint, so the app makes the same startup key call the CLI
   makes and reads the subscription block from its response; the minted key in that
   response is discarded, never stored.
@@ -128,7 +128,9 @@ What follows from that:
 - The app can never repair a credential, so an expired one is shown as **expired** with a
   hint to sign in again via the CLI. It is a display state, never an error.
 - Once you do sign in again, the app notices the stored credential changed and resumes on
-  its own — no restart, no manual refresh.
+  its own — no restart, no manual refresh. The one exception is Muse with its token in the
+  Keychain: the app never reads that in the background, so click Refresh once to reconnect
+  (a Muse file backend resumes on its own).
 - Because refreshing is off the table as a way to get a fresh rate-limit window, polling
   backs off instead when a provider rate-limits an account.
 
@@ -204,9 +206,10 @@ rm -rf build
 
 ### Muse card says "Click Refresh to connect Muse"
 - Muse keeps its token in the Keychain, and the app never reads it in the background
-- Click Refresh on the card; macOS shows one prompt and asks for your login keychain password
-- The token is then held in memory only, for the app's lifetime, and is never written anywhere
-- The card asks again after a relaunch, or after Muse rejects the token (401/403)
+- Click the Refresh button at the top of the popover (cards have no button of their own); macOS shows one prompt and asks for your login keychain password
+- The token is then held in memory only and is never written anywhere
+- It is dropped when the app quits, when Muse rejects it (401/403), when you sign out of Muse,
+  or when you sign in as a different account; the card then asks again
 - *Always Allow* does not stick: Muse rewrites its Keychain item whenever it launches or
   refreshes, which resets the item's access list
 
@@ -225,7 +228,8 @@ rm -rf build
 
 ### An account shows "Signed out" or "Expired"
 - Sign in again with that CLI; the app can't renew a credential itself
-- It picks the new credential up automatically once the CLI has written it
+- It picks the new credential up automatically once the CLI has written it (Muse with its
+  token in the Keychain: click Refresh to reconnect)
 
 ### Notifications not working
 - Click "Test Notification" in Settings
