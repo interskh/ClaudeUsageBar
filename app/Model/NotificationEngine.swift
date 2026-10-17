@@ -41,6 +41,7 @@ struct NotificationAlert: Equatable {
         switch provider {
         case .anthropic: return "Claude Usage Alert"
         case .codex: return "Codex Usage Alert"
+        case .muse: return "Muse Usage Alert"
         }
     }
 

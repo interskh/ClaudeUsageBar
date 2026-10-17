@@ -48,6 +48,7 @@ enum MenuBarPresentation {
         switch provider {
         case .anthropic: return "⚡"
         case .codex: return "◆"
+        case .muse: return "✦"
         }
     }
 
@@ -55,6 +56,7 @@ enum MenuBarPresentation {
         switch provider {
         case .anthropic: return "Claude"
         case .codex: return "Codex"
+        case .muse: return "Muse"
         }
     }
 

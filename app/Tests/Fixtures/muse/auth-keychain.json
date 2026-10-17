@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "meta": {
+      "mechanism": "oauth",
+      "storage": "keychain",
+      "obtained_via": "device_code",
+      "api_base_url": "https://api.meta.ai/v1",
+      "subs_active": true,
+      "user_full_name": "Test User",
+      "user_email": "user@example.com"
+    }
+  }
+}

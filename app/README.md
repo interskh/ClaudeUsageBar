@@ -1,16 +1,17 @@
 # ClaudeUsageBar
 
-> Track your Claude and Codex usage right from your Mac menu bar!
+> Track your Claude, Codex, and Muse usage right from your Mac menu bar!
 
-A lightweight macOS menu bar app that displays the session and weekly usage limits of each Claude account on your Mac, plus your OpenAI Codex account, with real-time updates and notifications.
+A lightweight macOS menu bar app that displays the session and weekly usage limits of each Claude account on your Mac, plus your OpenAI Codex and Meta Muse accounts, with real-time updates and notifications.
 
-This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/ClaudeUsageBar) with **OAuth authentication, multi-profile support and Codex support** — no browser-session credential to paste, and nothing to configure.
+This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/ClaudeUsageBar) with **OAuth authentication, multi-profile support, Codex support, and Muse support** — no browser-session credential to paste, and nothing to configure.
 
 ## ✨ Features
 
 - 👥 **Multi-Account**: Tracks the Claude profiles in the usual locations, plus any you register
 - ◆ **Codex Support**: Tracks your ChatGPT/Codex subscription usage alongside Claude
-- 🔑 **Zero Setup**: Reads the OAuth credentials Claude Code and the Codex CLI already store
+- ● **Muse Support**: Tracks your Muse Code subscription usage (5-hour and weekly windows) alongside Claude
+- 🔑 **Zero Setup**: Reads the OAuth credentials Claude Code, the Codex CLI, and Muse already store
 - 🔒 **Read-Only Credentials**: Never writes, refreshes, or rotates a token
 - 🟢 **Real-time Usage Tracking**: Session (5-hour) and weekly (7-day) usage per account
 - 🎨 **Color-Coded Menu Bar**: One figure per provider, coloured by level (green/yellow/red)
@@ -26,10 +27,10 @@ This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/Claude
 
 **Menu Bar Display:**
 - One percentage per provider, each color-coded (green < 70%, yellow 70-90%, red ≥ 90%)
-- Example: `⚡ 78%   ◆ 31%` — `⚡` is the worst of your Claude profiles, `◆` is Codex
+- Example: `⚡ 78%   ◆ 31%   ● 12%` — `⚡` is the worst of your Claude profiles, `◆` is Codex, `●` is Muse
 
 **Popup Interface:**
-- One card per account, grouped under a CLAUDE and a CODEX heading; accounts with data expand to show their windows
+- One card per account, grouped under CLAUDE, CODEX, and MUSE headings; accounts with data expand to show their windows
 - Session (5-hour) usage with progress bar and reset time
 - Weekly (7-day) usage with progress bar and reset date
 - Any model-scoped weekly limits your plan reports, with their reset times
@@ -41,7 +42,7 @@ This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/Claude
 
 - macOS 12.0 (Monterey) or later
 - Apple Silicon (M1/M2/M3) or Intel Mac
-- [Claude Code](https://claude.com/claude-code) and/or the [Codex CLI](https://developers.openai.com/codex/cli), signed in on this Mac
+- [Claude Code](https://claude.com/claude-code), the [Codex CLI](https://developers.openai.com/codex/cli), and/or Muse (`muse`), signed in on this Mac
 
 ## 🚀 Installation
 
@@ -62,7 +63,7 @@ downloads, but they contain the original single-account app rather than this for
 
 ## 🔧 First-Time Setup
 
-There isn't one. Sign in to Claude Code (`claude`) and/or the Codex CLI (`codex`) as you
+There isn't one. Sign in to Claude Code (`claude`), the Codex CLI (`codex`), and/or Muse (`muse`) as you
 normally would, then launch ClaudeUsageBar — it finds those credentials itself and starts
 tracking. Nothing to paste, no key to enter.
 
@@ -75,6 +76,11 @@ tracking. Nothing to paste, no key to enter.
   states, not reasons to hide it).
 - **Codex**: the account the Codex CLI is signed in to, from `$CODEX_HOME` when that is
   set, otherwise `~/.codex`.
+- **Muse**: the account Muse is signed in to, from `~/.config/muse/auth.json`
+  (or `$MUSE_AUTH_PATH`) plus the device token the CLI keeps in your Keychain. Muse
+  publishes no GET usage endpoint, so the app makes the same startup key call the CLI
+  makes and reads the subscription block from its response; the minted key in that
+  response is discarded, never stored.
 - Directories that hold no account at all (backups, scratch dirs) are ignored entirely.
 
 Discovery re-runs while the app is open, so a profile you sign into — or out of — is
@@ -128,7 +134,7 @@ What follows from that:
 ## 🔐 Privacy & Security
 
 - ✅ **No analytics, no telemetry, no third-party services** - the only network calls the
-  app makes are authenticated requests to `api.anthropic.com` and `chatgpt.com`, the
+  app makes are authenticated requests to `api.anthropic.com`, `chatgpt.com`, and `api.meta.ai`, the
   providers' own usage endpoints
 - ✅ **Credentials are read, never written** - the access token only ever goes to the
   provider that issued it
@@ -140,8 +146,8 @@ What follows from that:
 
 ## 🎯 How It Works
 
-1. Discovers your Claude profiles — the usual locations plus any you registered — and
-   the Codex account, from the credentials the CLIs already store
+1. Discovers your Claude profiles — the usual locations plus any you registered — plus
+   the Codex and Muse accounts, from the credentials the CLIs already store
 2. Reads (never writes) each account's OAuth access token at fetch time
 3. Fetches usage from each provider's usage endpoint, per account
 4. Displays the worst-case figure per provider in your menu bar, with a card per account
@@ -190,7 +196,7 @@ rm -rf build
 ## 🐛 Troubleshooting
 
 ### No accounts showing
-- Make sure Claude Code or the Codex CLI is signed in on this Mac (`claude`, `codex`)
+- Make sure Claude Code, the Codex CLI, or Muse is signed in on this Mac (`claude`, `codex`, `muse`)
 - If the profile lives outside `~/.claude` / `~/.claude-*` / your designated config
   directory, register its directory in Settings — it is not found otherwise
 - Discovery re-runs periodically and when you open the popup
@@ -235,7 +241,7 @@ Forked from [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/ClaudeUsageB
 
 ## ⚠️ Disclaimer
 
-This app reads Anthropic's and OpenAI's internal usage endpoints, which may change without notice. It is not affiliated with or endorsed by Anthropic or OpenAI. Use at your own risk.
+This app reads Anthropic's, OpenAI's, and Meta's internal usage endpoints, which may change without notice. It is not affiliated with or endorsed by Anthropic, OpenAI, or Meta. Use at your own risk.
 
 ## 🙏 Acknowledgments
 

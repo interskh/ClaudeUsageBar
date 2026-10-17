@@ -1,0 +1,8 @@
+{
+  "is_subs_active": false,
+  "require_payment": false,
+  "subs_usage": {
+    "window": {"used_percent": 10, "window_duration_mins": 300, "resets_at": 1789568145},
+    "weekly": {"used_percent": 10, "resets_at": 1789948800}
+  }
+}

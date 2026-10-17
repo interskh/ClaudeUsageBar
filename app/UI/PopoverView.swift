@@ -19,7 +19,7 @@ struct UsageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if store.accounts.isEmpty {
-                    Text("No accounts discovered.\nSign in via Claude Code or Codex.")
+                    Text("No accounts discovered.\nSign in via Claude Code, Codex, or Muse.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -80,6 +80,7 @@ struct UsageView: View {
         switch provider {
         case .anthropic: return "CLAUDE"
         case .codex: return "CODEX"
+        case .muse: return "MUSE"
         }
     }
 

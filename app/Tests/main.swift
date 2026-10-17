@@ -13,6 +13,7 @@ MenuBarPresentationTests.run()
 ClaudeProfileDiscoveryTests.run()
 AnthropicProviderTests.run()
 CodexProviderTests.run()
+MuseProviderTests.run()
 // `UsageEngine` is @MainActor — that is how §6's single-writer rule is checked
 // rather than asserted. Top-level code is not actor-isolated in Swift 5 mode but does
 // run on the main thread, which is what the isolation actually requires.

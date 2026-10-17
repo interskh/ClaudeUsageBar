@@ -183,7 +183,7 @@ final class UsageEngine {
     // re-read is that the survey's copy may be the stale one.
     private let credentialProbe: (AccountRef) -> CredentialFact
 
-    init(providerOrder: [ProviderKind] = [.anthropic, .codex],
+    init(providerOrder: [ProviderKind] = [.anthropic, .codex, .muse],
          restoring: [String: PersistedAccountState] = [:],
          restoringLedgers: [String: PersistedCredentialLedger] = [:],
          now: Date = Date(timeIntervalSince1970: 0),
@@ -279,7 +279,7 @@ final class UsageEngine {
     // colon, and escapes colons and backslashes inside every component AFTER it — so a
     // prefix test against a known provider name cannot be spoofed by a component.
     static func provider(ofStorageKey key: String) -> ProviderKind? {
-        for provider in [ProviderKind.anthropic, .codex]
+        for provider in [ProviderKind.anthropic, .codex, .muse]
         where key.hasPrefix(provider.rawValue + ":") {
             return provider
         }

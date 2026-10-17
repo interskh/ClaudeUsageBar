@@ -82,7 +82,7 @@ Account fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `provider` | string | `anthropic` or `codex`. |
+| `provider` | string | `anthropic`, `codex`, or `muse`. |
 | `id` | string | Stable, provider-namespaced account identity. |
 | `label` | string | Current display label. |
 | `subtitle` | string | Optional account subtitle, usually an email address. |

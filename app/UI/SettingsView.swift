@@ -103,6 +103,7 @@ struct SettingsView: View {
         switch provider {
         case .anthropic: return "CLAUDE"
         case .codex: return "CODEX"
+        case .muse: return "MUSE"
         }
     }
 

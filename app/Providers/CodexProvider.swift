@@ -405,8 +405,8 @@ enum CodexUsageParser {
     // §5.2: A NULL WINDOW MEANS "NO DATA", NOT "0% USED". A window does not begin until a
     // real generation request is made, so a dormant window is genuinely absent rather
     // than zeroed, and rendering it as an empty bar would claim headroom nobody measured.
-    // (Nothing in this app may start one: that would spend the user's real quota, which
-    // is why the whole networking seam is GET-only.)
+    // (Nothing in this app may start one: that would spend the user's real quota. No
+    // provider makes a generation request; Muse's one POST is its key-mint read.)
     private static func project(_ object: [String: Any],
                                 scope: WindowScope,
                                 name: String?,

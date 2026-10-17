@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "meta": {
+      "mechanism": "api_key",
+      "storage": "file",
+      "access_token": "some-api-key",
+      "user_email": "user@example.com"
+    }
+  }
+}

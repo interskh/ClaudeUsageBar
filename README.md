@@ -1,13 +1,13 @@
 # ClaudeUsageBar
 
-> Track your Claude and Codex usage right from your Mac menu bar!
+> Track your Claude, Codex, and Muse usage right from your Mac menu bar!
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/macOS-12.0+-blue.svg)](https://www.apple.com/macos/)
 
-A lightweight, open-source macOS menu bar application that displays your Claude and OpenAI Codex usage limits — for **every** account you are signed in to — with real-time updates and notifications.
+A lightweight, open-source macOS menu bar application that displays your Claude, OpenAI Codex, and Meta Muse usage limits — for **every** account you are signed in to — with real-time updates and notifications.
 
-This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/ClaudeUsageBar) with **OAuth authentication, multi-profile support and Codex support**. The old browser-session setup is gone: the app reads the OAuth credentials Claude Code and the Codex CLI already keep on your Mac.
+This is a fork of [Artzainnn/ClaudeUsageBar](https://github.com/Artzainnn/ClaudeUsageBar) with **OAuth authentication, multi-profile support, Codex support, and Muse support**. The old browser-session setup is gone: the app reads the OAuth credentials Claude Code and the Codex CLI already keep on your Mac.
 
 ## 📥 Install
 
@@ -25,12 +25,12 @@ The universal binary lands in `app/build/ClaudeUsageBar.app`; drag it to Applica
 
 ## 📦 Set Up (nothing to configure)
 
-1. Sign in to **Claude Code** (`claude`) and/or the **Codex CLI** (`codex`), the way you normally would.
+1. Sign in to **Claude Code** (`claude`), the **Codex CLI** (`codex`), and/or **Muse** (`muse`), the way you normally would.
 2. Launch ClaudeUsageBar.
 
 That's it. The app finds the credentials those CLIs already stored, picks up your Claude profiles in the usual locations plus your Codex account, and starts tracking them. There is nothing to paste and no key to enter.
 
-Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and whatever configuration directory your environment designates; a profile kept anywhere else is added by registering its directory in Settings. Codex honours `$CODEX_HOME`, falling back to `~/.codex`.
+Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and whatever configuration directory your environment designates; a profile kept anywhere else is added by registering its directory in Settings. Codex honours `$CODEX_HOME`, falling back to `~/.codex`. Muse reads `~/.config/muse/auth.json` (or `$MUSE_AUTH_PATH`) plus the token the Muse CLI keeps in your Keychain.
 
 If no account is found, the popover tells you to sign in with Claude Code or the Codex CLI — it never asks you to paste a credential.
 
@@ -51,6 +51,7 @@ error, and it can never damage your session.
 
 - 👥 **Every account at once** - Tracks your Claude profiles, not just one, plus any you register by hand
 - ◆ **Codex support** - Your ChatGPT/Codex subscription usage alongside Claude
+- ● **Muse support** - Your Muse Code subscription usage (5-hour and weekly windows)
 - 🟢 **Real-time usage tracking** - Session (5-hour) and weekly (7-day) limits per account
 - 🎨 **Color-coded menu bar** - One figure per provider, coloured green/yellow/red
 - 🔔 **Smart notifications** - Per-account alerts at 25%, 50%, 75%, 90% thresholds
@@ -133,8 +134,8 @@ The built app will be in `app/build/ClaudeUsageBar.app`
 ### Project Structure
 
 - `app/Model/` - Accounts, usage windows, snapshots
-- `app/Providers/` - Anthropic and Codex usage providers
-- `app/Credentials/` - Keychain reads, Claude profile discovery, Codex auth reader
+- `app/Providers/` - Anthropic, Codex, and Muse usage providers
+- `app/Credentials/` - Keychain reads, Claude profile discovery, Codex and Muse auth readers
 - `app/Core/` - Account store, polling, notifications, settings
 - `app/UI/` - Menu bar, popover, account cards, settings
 - `app/build.sh` - Build script

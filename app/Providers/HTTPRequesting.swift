@@ -7,16 +7,22 @@ import Foundation
 // sources for networking symbols and fails loud, so this seam is enforced rather than
 // merely intended.
 //
-// GET-only, deliberately: §1 makes the app read-only against both vendors, and a
-// protocol with no verb but `get` cannot grow a write path by accident.
+// Read-only against every vendor (§1): the app never writes, refreshes, or rotates
+// a credential. GET is the default verb. The single POST in the app is Muse's key-mint
+// call, which the Muse CLI itself makes at startup to read its subscription block;
+// the minted key it returns is discarded, and no local credential changes.
 
 struct HTTPRequest: Equatable {
     let url: URL
     let headers: [String: String]
+    let method: String
+    let body: Data?
 
-    init(url: URL, headers: [String: String]) {
+    init(url: URL, headers: [String: String], method: String = "GET", body: Data? = nil) {
         self.url = url
         self.headers = headers
+        self.method = method
+        self.body = body
     }
 }
 
@@ -31,6 +37,13 @@ enum HTTPOutcome {
 
 protocol HTTPRequesting {
     func get(_ request: HTTPRequest) async -> HTTPOutcome
+    func post(_ request: HTTPRequest) async -> HTTPOutcome
+}
+
+extension HTTPRequesting {
+    func post(_ request: HTTPRequest) async -> HTTPOutcome {
+        .failure(message: "POST is not supported by this client")
+    }
 }
 
 enum HTTPHeaders {

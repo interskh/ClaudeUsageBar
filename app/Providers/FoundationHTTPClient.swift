@@ -14,8 +14,8 @@ import Foundation
 // header, or a body; the error path carries `localizedDescription` of a transport error
 // only (acceptance criterion 16's sibling rule in §5).
 struct FoundationHTTPClient: HTTPRequesting {
-    // Read-only by construction: `.get` is the only method ever set, and there is no
-    // parameter that could change it.
+    // The default verb. Muse's key-mint call is the one POST (see MuseProvider);
+    // it never carries a body this app built from user data, only the fixed `{}`.
     static let httpMethod = "GET"
 
     let timeout: TimeInterval
@@ -37,8 +37,17 @@ struct FoundationHTTPClient: HTTPRequesting {
     }
 
     func get(_ request: HTTPRequest) async -> HTTPOutcome {
+        await send(request, method: FoundationHTTPClient.httpMethod)
+    }
+
+    func post(_ request: HTTPRequest) async -> HTTPOutcome {
+        await send(request, method: "POST")
+    }
+
+    private func send(_ request: HTTPRequest, method: String) async -> HTTPOutcome {
         var urlRequest = URLRequest(url: request.url)
-        urlRequest.httpMethod = FoundationHTTPClient.httpMethod
+        urlRequest.httpMethod = method
+        urlRequest.httpBody = request.body
         urlRequest.timeoutInterval = timeout
         for (name, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: name)

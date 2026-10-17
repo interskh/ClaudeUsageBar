@@ -1,0 +1,16 @@
+{
+  "api_key": "minted-key-must-not-leak",
+  "base_url": "https://api.meta.ai/v1",
+  "is_subs_active": true,
+  "require_payment": false,
+  "has_payment_method": true,
+  "subs_tier_id": "12345",
+  "subs_tier_name": "Muse Code Power Usage",
+  "subs_usage": {
+    "tier": "12345",
+    "window": {"used_percent": 24, "window_duration_mins": 300, "resets_at": 1789568145},
+    "weekly": {"used_percent": 45, "resets_at": 1789948800}
+  },
+  "user_email": "user@example.com",
+  "user_full_name": "Test User"
+}

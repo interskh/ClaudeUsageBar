@@ -11,6 +11,7 @@ import Foundation
 enum ProviderKind: String, Hashable, Sendable {
     case anthropic
     case codex
+    case muse
 
     // The CLI that writes THIS provider's credential, for the "Sign in via …" recovery
     // hint on a signed-out/expired card. Derived from the provider so a lapsed Codex
@@ -19,6 +20,7 @@ enum ProviderKind: String, Hashable, Sendable {
         switch self {
         case .anthropic: return "Claude Code"
         case .codex: return "Codex"
+        case .muse: return "Muse"
         }
     }
 }

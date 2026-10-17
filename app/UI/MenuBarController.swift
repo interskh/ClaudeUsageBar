@@ -74,6 +74,7 @@ extension AppDelegate {
         switch provider {
         case .anthropic: return createSparkIcon(color: color)
         case .codex:     return createDiamondIcon(color: color)
+        case .muse:      return createCircleIcon(color: color)
         }
     }
 
@@ -109,6 +110,20 @@ extension AppDelegate {
         image.unlockFocus()
         image.isTemplate = false
 
+        return image
+    }
+
+    // Muse's mark: a filled circle, drawn as a bezier so it takes the band colour
+    // exactly as the other marks do rather than rendering as a fixed-colour glyph.
+    func createCircleIcon(color: NSColor) -> NSImage {
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let path = NSBezierPath(ovalIn: NSRect(x: 3, y: 3, width: 10, height: 10))
+        color.setFill()
+        path.fill()
+        image.unlockFocus()
+        image.isTemplate = false
         return image
     }
 

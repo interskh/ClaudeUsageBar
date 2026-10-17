@@ -50,6 +50,7 @@ final class UsageStore: ObservableObject {
     private let engine: UsageEngine
     private let anthropic: AnthropicProvider
     private let codex: CodexProvider
+    private let muse: MuseProvider
     private let cacheWriter = UsageCacheWriter()
     private var tickTimer: Timer?
     private var surveyTimer: Timer?
@@ -79,7 +80,7 @@ final class UsageStore: ObservableObject {
         // AT THAT MOMENT (§6) rather than reuse the last survey's copy, which is exactly
         // the stale reading the re-read exists to rule out.
         self.engine = UsageEngine(
-            providerOrder: [.anthropic, .codex],
+            providerOrder: [.anthropic, .codex, .muse],
             restoring: contents.accounts,
             restoringLedgers: contents.ledgers,
             now: now,
@@ -98,6 +99,7 @@ final class UsageStore: ObservableObject {
             registeredLocations: { UsageStore.registeredLocations(in: defaults) }
         )
         self.codex = CodexProvider(reader: UsageStore.makeCodexReader(), http: http)
+        self.muse = MuseProvider(reader: UsageStore.makeMuseReader(), http: http)
         // A key the index names but this build cannot read — corrupt bytes, or a payload
         // written by a version with a different shape — never becomes an account payload,
         // so it never enters the engine's unclaimed map and the engine's orphan sweep
@@ -251,7 +253,12 @@ final class UsageStore: ObservableObject {
     }
 
     private func run(_ task: PollTask) {
-        let provider: any UsageProvider = task.ref.provider == .anthropic ? anthropic : codex
+        let provider: any UsageProvider
+        switch task.ref.provider {
+        case .anthropic: provider = anthropic
+        case .codex: provider = codex
+        case .muse: provider = muse
+        }
         Task { [weak self] in
             // `fetch` is nonisolated and async: it runs off the main actor, so a blocking
             // credential read inside it never stalls the menu bar. Only the result comes
@@ -299,7 +306,7 @@ final class UsageStore: ObservableObject {
             let now = Date()
             // Both providers ran, so both may reclaim: a Codex configuration that has
             // been removed yields no observation and its state is reclaimed (§6).
-            self.engine.ingest(observations, covering: [.anthropic, .codex], now: now)
+            self.engine.ingest(observations, covering: [.anthropic, .codex, .muse], now: now)
             self.flush()
             self.publish(now: now)
             self.pump(now: now)
@@ -358,6 +365,11 @@ final class UsageStore: ObservableObject {
         CodexAuthReader(fileSystem: SystemProfileFileSystem())
     }
 
+    private nonisolated static func makeMuseReader() -> MuseAuthReader {
+        MuseAuthReader(fileSystem: SystemProfileFileSystem(),
+                       tokens: KeychainStore(account: "meta"))
+    }
+
     nonisolated static func collectObservations(registeredLocations: [String],
                                                 now: Date) -> [AccountObservation] {
         var observations: [AccountObservation] = []
@@ -386,6 +398,18 @@ final class UsageStore: ObservableObject {
                 account: account,
                 credentialLocation: codexLocation,
                 credential: codexCredentialFact(reader: reader)
+            ))
+        }
+
+        // Muse. Single account, so the auth file's path is its location.
+        let museReader = makeMuseReader()
+        let museLocation = museReader.authPath ?? "muse"
+        for account in MuseProvider(reader: museReader, http: FoundationHTTPClient())
+            .discoverAccounts() {
+            observations.append(AccountObservation(
+                account: account,
+                credentialLocation: museLocation,
+                credential: museCredentialFact(reader: museReader)
             ))
         }
 
@@ -426,6 +450,19 @@ final class UsageStore: ObservableObject {
         return CredentialFact(digest: ClaudeCredential.credentialDigest(data))
     }
 
+    // Muse's token lives in the Keychain, so the digest is taken over the Keychain
+    // payload when one is readable; the auth file is the fallback. No expiry is
+    // published, so `expiresAt` stays nil — as with Codex, upstream decides.
+    private nonisolated static func museCredentialFact(reader: MuseAuthReader) -> CredentialFact {
+        if case .found(let blob) = reader.tokens.lookupCredential(service: MuseAuthReader.keychainService) {
+            return CredentialFact(digest: ClaudeCredential.credentialDigest(blob))
+        }
+        guard let path = reader.authPath,
+              case .contents(let data) = reader.fileSystem.readFile(atPath: path)
+        else { return CredentialFact() }
+        return CredentialFact(digest: ClaudeCredential.credentialDigest(data))
+    }
+
     // Re-reads ONE account's credential, now. Used only by the engine's second-rejection
     // test, which is why it re-runs discovery rather than consulting a cache: the whole
     // question being asked is whether the copy we last saw is out of date.
@@ -442,6 +479,8 @@ final class UsageStore: ObservableObject {
                                            credentials: discovery.credentials)
         case .codex:
             return codexCredentialFact(reader: makeCodexReader())
+        case .muse:
+            return museCredentialFact(reader: makeMuseReader())
         }
     }
 }

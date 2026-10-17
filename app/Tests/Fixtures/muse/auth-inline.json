@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "meta": {
+      "mechanism": "oauth",
+      "storage": "file",
+      "access_token": "inline-device-token",
+      "user_email": "inline@example.com"
+    }
+  }
+}
