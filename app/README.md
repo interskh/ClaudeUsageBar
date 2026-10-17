@@ -204,7 +204,9 @@ rm -rf build
 ### macOS keeps asking "security wants to access key ai.meta.dev.credentials"
 - The Muse CLI locks its Keychain item to Meta-signed apps; *Always Allow* does not stick
 - Run once in Terminal (asks for your login keychain password):
-  `security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta`
+  `security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta ~/Library/Keychains/login.keychain-db`
+- Check it took: `security dump-keychain -a ~/Library/Keychains/login.keychain-db | grep -c 'apple-tool:, teamid:V9WTTPBFK9'`
+  prints `1`; if it prints `0`, the password was not accepted — run the grant again
 - Re-run it after `muse logout` / `muse login`; undo with `-S "teamid:V9WTTPBFK9"`
 
 ### An account shows "Signed out" or "Expired"

@@ -35,8 +35,10 @@ Claude profiles are discovered in `~/.claude`, any `~/.claude-*` directory, and 
 **Muse: one-time Keychain grant.** The Muse CLI locks its Keychain item to Meta-signed apps, so macOS asks *"security wants to access key ai.meta.dev.credentials"* on every refresh — and *Always Allow* does not stick. Run this once in Terminal (it asks for your login keychain password):
 
 ```bash
-security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta
+security set-generic-password-partition-list -S "apple-tool:,teamid:V9WTTPBFK9" -s ai.meta.dev.credentials -a meta ~/Library/Keychains/login.keychain-db
 ```
+
+Check it took: `security dump-keychain -a ~/Library/Keychains/login.keychain-db | grep -c 'apple-tool:, teamid:V9WTTPBFK9'` prints `1`. If it prints `0`, the password was not accepted — run the command again.
 
 It lets Apple's own `security` tool read the item silently, as it already does for Claude Code; the Muse CLI keeps its access. Re-run it after `muse logout` / `muse login`, which recreate the item. To undo, run the same command with `-S "teamid:V9WTTPBFK9"`.
 
